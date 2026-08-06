@@ -116,6 +116,25 @@ export class ImapSmtpBackend implements MailBackend {
     return (await this.session.specialFolders()).inbox ?? "INBOX";
   }
 
+  // Read-path lock acquisition: a nonexistent folder makes getMailboxLock
+  // fail the same way a transient server error would. Distinguish the two
+  // here (mirroring resolveMoveTarget's diagnosis) so a bad folder name
+  // surfaces as a permanent InvalidInputError instead of a pointless
+  // reconnect-and-retry ending in BackendUnavailableError.
+  private async lockForRead(
+    client: import("imapflow").ImapFlow,
+    folder: string,
+  ): Promise<import("imapflow").MailboxLockObject> {
+    try {
+      return await client.getMailboxLock(folder);
+    } catch (error) {
+      const listed = await client.list();
+      if (listed.some((f) => f.path === folder)) throw error;
+      const names = listed.map((f) => f.path).join(", ");
+      throw new InvalidInputError(`unknown folder '${folder}'. Folders: ${names}`);
+    }
+  }
+
   private surfacedFromHeaders(headerText: string): Record<string, string> {
     const result: Record<string, string> = {};
     const unfolded = headerText.replace(/\r?\n[ \t]+/g, " ");
@@ -141,7 +160,7 @@ export class ImapSmtpBackend implements MailBackend {
   // downloads. Never fetches full sources during listing.
   private async summariesFor(folder: string, uids: number[]): Promise<MessageSummary[]> {
     return this.session.withClient(async (client) => {
-      const lock = await client.getMailboxLock(folder);
+      const lock = await this.lockForRead(client, folder);
       try {
         const headerFields = (this.config.surface_headers ?? []).map((h) => h.toLowerCase());
         interface FetchedMeta {
@@ -221,7 +240,7 @@ export class ImapSmtpBackend implements MailBackend {
     offset: number,
   ): Promise<number[]> {
     return this.session.withClient(async (client) => {
-      const lock = await client.getMailboxLock(folder);
+      const lock = await this.lockForRead(client, folder);
       try {
         const uids = await client.search(includeRead ? { all: true } : { seen: false }, { uid: true });
         if (uids === false || uids.length === 0) return [];
@@ -242,7 +261,7 @@ export class ImapSmtpBackend implements MailBackend {
   async search(options: SearchOptions): Promise<MessageSummary[]> {
     const folder = options.folder ?? (await this.inboxFolder());
     const uids = await this.session.withClient(async (client) => {
-      const lock = await client.getMailboxLock(folder);
+      const lock = await this.lockForRead(client, folder);
       try {
         const criteria: Record<string, unknown> = {};
         if (options.query !== null) criteria["text"] = options.query;
@@ -266,7 +285,7 @@ export class ImapSmtpBackend implements MailBackend {
   protected async fetchRaw(id: string): Promise<{ folder: string; uid: number; source: Buffer; flags: Set<string> }> {
     const { folder, uid } = parseImapId(id);
     return this.session.withClient(async (client) => {
-      const lock = await client.getMailboxLock(folder);
+      const lock = await this.lockForRead(client, folder);
       try {
         const message = await client.fetchOne(
           String(uid), { uid: true, source: true, flags: true }, { uid: true },
@@ -316,7 +335,7 @@ export class ImapSmtpBackend implements MailBackend {
 
   private async bodyStructureOf(folder: string, uid: number): Promise<Record<string, unknown>> {
     return this.session.withClient(async (client) => {
-      const lock = await client.getMailboxLock(folder);
+      const lock = await this.lockForRead(client, folder);
       try {
         const message = await client.fetchOne(String(uid), { uid: true, bodyStructure: true }, { uid: true });
         if (message === false || message.bodyStructure === undefined) {
@@ -342,7 +361,7 @@ export class ImapSmtpBackend implements MailBackend {
       );
     }
     return this.session.withClient(async (client) => {
-      const lock = await client.getMailboxLock(folder);
+      const lock = await this.lockForRead(client, folder);
       try {
         const download = await client.download(String(uid), part.part, { uid: true });
         const content = await readPrefix(download.content, maxBytes + 1);

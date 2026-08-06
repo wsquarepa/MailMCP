@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ImapSmtpBackend } from "../../src/imap/backend.js";
-import { NotFoundError, ToolError } from "../../src/errors.js";
+import { InvalidInputError, NotFoundError, ToolError } from "../../src/errors.js";
 import { imapMailboxConfig, seedMessage } from "../helpers/greenmail.js";
 
 const NO_SEARCH = {
@@ -59,5 +59,14 @@ describe("ImapSmtpBackend reads (requires GreenMail)", () => {
 
   it("raises NotFoundError for a vanished uid", async () => {
     await expect(backend.getMessage("INBOX:999999")).rejects.toThrow(NotFoundError);
+  });
+
+  it("raises InvalidInputError naming the unknown folder and available folders when listing a bogus folder", async () => {
+    const error = await backend
+      .listMessages({ folder: "NoSuchFolder-bogus", includeRead: true, limit: 20, offset: 0 })
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(InvalidInputError);
+    expect((error as Error).message).toContain("NoSuchFolder-bogus");
+    expect((error as Error).message).toContain("INBOX");
   });
 });
