@@ -11,7 +11,7 @@ Copy [config.example.yml](config.example.yml) into a writable data directory, re
 ```sh
 mkdir -p data/graph-tokens
 cp config.example.yml data/config.yml
-docker run -v ./data:/data -e MAILMCP_CONFIG=/data/config.yml -e PORT=8080 -e GRAPH_TOKEN_CACHE_DIR=/data/graph-tokens -p 8080:8080 ghcr.io/<owner>/mailmcp:edge
+docker run -v ./data:/data -e MAILMCP_CONFIG=/data/config.yml -e PORT=8080 -e GRAPH_TOKEN_CACHE_DIR=/data/graph-tokens -p 8080:8080 ghcr.io/wsquarepa/mailmcp:edge
 ```
 
 The example also requires `IMAP_PASS_HERMES`, `IMAP_PASS_SHARED`, and `MCP_KEY_HERMES`; pass them with additional `-e` options or an environment file.
@@ -34,11 +34,23 @@ Other MCP clients can connect to `http://host:8080/mcp` using the streamable HTT
 
 ## Graph mailbox setup
 
-Create an Azure app registration, enable its public client flow, and grant the delegated Microsoft Graph permissions `Mail.ReadWrite` and `Mail.Send`. Authenticate each configured Graph mailbox with the device-code flow:
+Create an Azure app registration, enable its public client flow, and grant the delegated Microsoft Graph permissions `Mail.ReadWrite` and `Mail.Send`. Put the registration's tenant ID and client ID in the mailbox's `graph:` block in the config. Authenticate each configured Graph mailbox with the device-code flow:
 
 ```sh
 mailmcp auth <mailbox>
 ```
+
+When running from Docker, use the same entrypoint:
+
+```bash
+docker run -it --rm \
+  -v ./data:/data \
+  -e MAILMCP_CONFIG=/data/config.yml \
+  -e GRAPH_TOKEN_CACHE_DIR=/data/graph-tokens \
+  ghcr.io/wsquarepa/mailmcp:edge auth <mailbox>
+```
+
+The auth command needs `MAILMCP_CONFIG` and `GRAPH_TOKEN_CACHE_DIR` set just like `serve`, and the device-code token cache lands in the mounted `graph-tokens` directory so the serving container picks it up.
 
 Each outgoing attachment sent through Graph is capped at 3 MB.
 
