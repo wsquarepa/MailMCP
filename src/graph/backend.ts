@@ -58,6 +58,8 @@ function isoSecond(date: Date): string {
 }
 
 export class GraphBackend implements MailBackend {
+  private static readonly SIMPLE_UPLOAD_MAX = 3 * 1024 * 1024;
+
   private readonly idCache = new Map<string, string>();
   private folderIdCache: Map<string, string> | null = null;
 
@@ -334,13 +336,189 @@ export class GraphBackend implements MailBackend {
     return { filename: meta.name, mimeType: meta.contentType, size: content.length, content };
   }
 
-  async createDraft(_input: DraftInput): Promise<string> { throw new Error("not implemented"); }
-  async updateDraft(_id: string, _input: DraftInput): Promise<string> { throw new Error("not implemented"); }
-  async sendDraft(_id: string): Promise<SendResult> { throw new Error("not implemented"); }
-  async move(_ids: string[], _target: string): Promise<BulkResult> { throw new Error("not implemented"); }
-  async markRead(_ids: string[]): Promise<BulkResult> { throw new Error("not implemented"); }
-  async markUnread(_ids: string[]): Promise<BulkResult> { throw new Error("not implemented"); }
-  async deleteToTrash(_ids: string[]): Promise<BulkResult> { throw new Error("not implemented"); }
+  private recipientsJson(addresses: Address[]): { emailAddress: { name: string; address: string } }[] {
+    return addresses.map((a) => ({ emailAddress: { name: a.name, address: a.address } }));
+  }
+
+  private draftPatchBody(input: DraftInput): Record<string, unknown> {
+    const patch: Record<string, unknown> = {};
+    if (input.subject !== null) patch["subject"] = input.subject;
+    if (input.body !== null) patch["body"] = { contentType: "text", content: input.body };
+    if (input.to !== null) patch["toRecipients"] = this.recipientsJson(input.to);
+    if (input.cc !== null) patch["ccRecipients"] = this.recipientsJson(input.cc);
+    if (input.bcc !== null) patch["bccRecipients"] = this.recipientsJson(input.bcc);
+    return patch;
+  }
+
+  // Graph's simple attachment upload caps at ~3 MB; larger needs an upload
+  // session (spec future-work). Checked before ANY mutation so a failed
+  // create/update never half-applies.
+  private assertAttachmentSizes(input: DraftInput): void {
+    for (const attachment of input.attachments ?? []) {
+      const bytes = Math.floor((attachment.contentBase64.length * 3) / 4);
+      if (bytes > GraphBackend.SIMPLE_UPLOAD_MAX) {
+        throw new InvalidInputError(
+          `attachment '${attachment.filename}' is about ${bytes} bytes; graph mailboxes accept at most 3 MB per attachment in v1`,
+        );
+      }
+    }
+  }
+
+  private async assertIsDraft(id: string): Promise<string> {
+    const nativeId = await this.resolveId(id);
+    const probe = await this.request<GraphMessage>(
+      "GET", `/me/messages/${encodeURIComponent(nativeId)}?$select=id,isDraft`, null, id,
+    );
+    if (!(probe.isDraft ?? false)) {
+      throw new InvalidInputError(`message ${id} is not a draft; only drafts can be updated or sent`);
+    }
+    return nativeId;
+  }
+
+  private async addAttachments(nativeId: string, id: string, input: DraftInput): Promise<void> {
+    for (const attachment of input.attachments ?? []) {
+      await this.request("POST", `/me/messages/${encodeURIComponent(nativeId)}/attachments`, {
+        "@odata.type": "#microsoft.graph.fileAttachment",
+        name: attachment.filename,
+        contentType: attachment.mimeType,
+        contentBytes: attachment.contentBase64,
+      }, id);
+    }
+  }
+
+  async createDraft(input: DraftInput): Promise<string> {
+    this.assertAttachmentSizes(input);
+    let draft: GraphMessage;
+    if (input.replyToMessageId !== null) {
+      const originalNative = await this.resolveId(input.replyToMessageId);
+      draft = await this.request<GraphMessage>(
+        "POST", `/me/messages/${encodeURIComponent(originalNative)}/createReply`, {}, input.replyToMessageId,
+      );
+      const patch = this.draftPatchBody(input);
+      if (Object.keys(patch).length > 0) {
+        draft = await this.request<GraphMessage>(
+          "PATCH", `/me/messages/${encodeURIComponent(draft.id)}`, patch, null,
+        );
+      }
+    } else {
+      draft = await this.request<GraphMessage>("POST", "/me/messages", this.draftPatchBody(input), null);
+    }
+    await this.addAttachments(draft.id, draft.id, input);
+    return this.shortIdFor(draft);
+  }
+
+  async updateDraft(id: string, input: DraftInput): Promise<string> {
+    this.assertAttachmentSizes(input);
+    const nativeId = await this.assertIsDraft(id);
+    if (input.attachments !== null) {
+      const existing = await this.request<{ value: { id: string }[] }>(
+        "GET", `/me/messages/${encodeURIComponent(nativeId)}/attachments?$select=id`, null, id,
+      );
+      for (const attachment of existing.value) {
+        await this.request(
+          "DELETE",
+          `/me/messages/${encodeURIComponent(nativeId)}/attachments/${encodeURIComponent(attachment.id)}`,
+          null, id,
+        );
+      }
+      await this.addAttachments(nativeId, id, input);
+    }
+    const patch = this.draftPatchBody(input);
+    const updated = Object.keys(patch).length > 0
+      ? await this.request<GraphMessage>("PATCH", `/me/messages/${encodeURIComponent(nativeId)}`, patch, id)
+      : await this.request<GraphMessage>(
+          "GET", `/me/messages/${encodeURIComponent(nativeId)}?${LIST_SELECT}`, null, id,
+        );
+    return this.shortIdFor(updated);
+  }
+
+  async sendDraft(id: string): Promise<SendResult> {
+    const nativeId = await this.assertIsDraft(id);
+    const draft = await this.request<GraphMessage>(
+      "GET",
+      `/me/messages/${encodeURIComponent(nativeId)}?$select=id,toRecipients,ccRecipients,bccRecipients,receivedDateTime,createdDateTime`,
+      null, id,
+    );
+    const recipients = [
+      ...(draft.toRecipients ?? []), ...(draft.ccRecipients ?? []), ...(draft.bccRecipients ?? []),
+    ].map((r) => toAddress(r)!).filter((a) => a.address !== "");
+    if (recipients.length === 0) {
+      throw new InvalidInputError(`draft ${id} has no recipients; update_draft it with a 'to' first`);
+    }
+    await this.request("POST", `/me/messages/${encodeURIComponent(nativeId)}/send`, {}, id);
+    // Graph moves the draft to Sent itself; nothing to reconcile.
+    return { recipients, warning: null };
+  }
+
+  private async moveDestination(target: string): Promise<string> {
+    const requested = target.toLowerCase();
+    const wellKnown = WELL_KNOWN[requested] ?? requested;
+    if (wellKnown === "deleteditems") {
+      throw new InvalidInputError("moving to Trash is not allowed; use delete_message instead");
+    }
+    if (Object.values(WELL_KNOWN).includes(wellKnown)) return wellKnown;
+    const id = (await this.folderIds()).get(requested);
+    if (id === undefined) {
+      const known = [...(await this.folderIds()).keys()].join(", ");
+      throw new InvalidInputError(`unknown folder '${target}'. Folders: ${known}`);
+    }
+    return id;
+  }
+
+  private async perId(
+    ids: string[],
+    operation: (nativeId: string, shortId: string) => Promise<{ id: string; newId: string | null }>,
+  ): Promise<BulkResult> {
+    const result: BulkResult = { done: [], failed: [] };
+    for (const id of ids) {
+      try {
+        result.done.push(await operation(await this.resolveId(id), id));
+      } catch (error) {
+        result.failed.push({ id, reason: error instanceof Error ? error.message : String(error) });
+      }
+    }
+    return result;
+  }
+
+  async move(ids: string[], target: string): Promise<BulkResult> {
+    let destination: string;
+    try {
+      destination = await this.moveDestination(target);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      return { done: [], failed: ids.map((id) => ({ id, reason })) };
+    }
+    return this.perId(ids, async (nativeId, shortId) => {
+      const moved = await this.request<GraphMessage>(
+        "POST", `/me/messages/${encodeURIComponent(nativeId)}/move`, { destinationId: destination }, shortId,
+      );
+      return { id: shortId, newId: this.shortIdFor(moved) };
+    });
+  }
+
+  private async patchIsRead(ids: string[], isRead: boolean): Promise<BulkResult> {
+    return this.perId(ids, async (nativeId, shortId) => {
+      await this.request("PATCH", `/me/messages/${encodeURIComponent(nativeId)}`, { isRead }, shortId);
+      return { id: shortId, newId: shortId };
+    });
+  }
+
+  async markRead(ids: string[]): Promise<BulkResult> {
+    return this.patchIsRead(ids, true);
+  }
+
+  async markUnread(ids: string[]): Promise<BulkResult> {
+    return this.patchIsRead(ids, false);
+  }
+
+  async deleteToTrash(ids: string[]): Promise<BulkResult> {
+    return this.perId(ids, async (nativeId, shortId) => {
+      const moved = await this.request<GraphMessage>(
+        "POST", `/me/messages/${encodeURIComponent(nativeId)}/move`, { destinationId: "deleteditems" }, shortId,
+      );
+      return { id: shortId, newId: this.shortIdFor(moved) };
+    });
+  }
 
   async close(): Promise<void> {
     this.idCache.clear();

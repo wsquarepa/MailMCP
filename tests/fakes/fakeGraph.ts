@@ -233,11 +233,88 @@ export class FakeGraph {
     return { status: 404, json: { error: { code: "fakeGraph: unhandled route", method, pathname } } };
   }
 
-  // Write routes are completed in Task 14; until then unmatched writes 404.
-  private handleWrite(_method: string, _message: FakeMessage, sub: string, _body: string): {
+  private handleWrite(method: string, message: FakeMessage, sub: string, body: string): {
     status: number; json: object;
   } {
-    return { status: 404, json: { error: { code: "fakeGraph: write route not yet implemented", sub } } };
+    const fromWire = (
+      list: { emailAddress: { name?: string; address: string } }[] | undefined,
+    ): { name: string; address: string }[] | undefined =>
+      list?.map((r) => ({ name: r.emailAddress.name ?? "", address: r.emailAddress.address }));
+
+    if (method === "PATCH" && sub === "") {
+      const patch = JSON.parse(body) as {
+        subject?: string; body?: { contentType: "text" | "html"; content: string };
+        toRecipients?: { emailAddress: { name?: string; address: string } }[];
+        ccRecipients?: { emailAddress: { name?: string; address: string } }[];
+        bccRecipients?: { emailAddress: { name?: string; address: string } }[];
+        isRead?: boolean;
+      };
+      const touchesContent =
+        patch.subject !== undefined || patch.body !== undefined ||
+        patch.toRecipients !== undefined || patch.ccRecipients !== undefined ||
+        patch.bccRecipients !== undefined;
+      if (touchesContent && !message.isDraft) {
+        return { status: 400, json: { error: { code: "ErrorInvalidOperation", message: "content patch on non-draft" } } };
+      }
+      if (patch.subject !== undefined) message.subject = patch.subject;
+      if (patch.body !== undefined) { message.body = patch.body.content; message.bodyType = patch.body.contentType; }
+      if (patch.isRead !== undefined) message.isRead = patch.isRead;
+      const to = fromWire(patch.toRecipients);
+      if (to !== undefined) message.toRecipients = to;
+      const cc = fromWire(patch.ccRecipients);
+      if (cc !== undefined) message.ccRecipients = cc;
+      const bcc = fromWire(patch.bccRecipients);
+      if (bcc !== undefined) message.bccRecipients = bcc;
+      return { status: 200, json: fullJson(message) };
+    }
+    if (method === "POST" && sub === "/send") {
+      if (!message.isDraft) {
+        return { status: 400, json: { error: { code: "ErrorInvalidOperation", message: "send on non-draft" } } };
+      }
+      message.folder = "sentitems";
+      message.isDraft = false;
+      return { status: 202, json: {} };
+    }
+    if (method === "POST" && sub === "/move") {
+      const { destinationId } = JSON.parse(body) as { destinationId: string };
+      const wellKnown = FOLDERS.find((f) => f === destinationId || folderId(f) === destinationId);
+      if (wellKnown === undefined) {
+        return { status: 400, json: { error: { code: "ErrorInvalidIdMalformed", message: `bad destinationId '${destinationId}'` } } };
+      }
+      message.folder = wellKnown;
+      // ImmutableId semantics: the id survives the move.
+      return { status: 201, json: fullJson(message) };
+    }
+    if (method === "POST" && sub === "/createReply") {
+      const id = `AAMk${randomUUID()}=`;
+      this.messages.push({
+        ...message,
+        id,
+        folder: "drafts",
+        subject: message.subject.startsWith("Re:") ? message.subject : `Re: ${message.subject}`,
+        toRecipients: [{ name: message.fromName, address: message.fromAddress }],
+        ccRecipients: [], bccRecipients: [],
+        isDraft: true, isRead: true, receivedAtMs: null,
+        createdAtMs: message.createdAtMs + 60_000,
+        body: "", headers: {}, attachments: [],
+      });
+      return { status: 201, json: fullJson(this.byId(id)!) };
+    }
+    if (method === "POST" && sub === "/attachments") {
+      const attachment = JSON.parse(body) as { name: string; contentType: string; contentBytes: string };
+      if (Buffer.from(attachment.contentBytes, "base64").length > 3 * 1024 * 1024) {
+        return { status: 400, json: { error: { code: "ErrorAttachmentSizeShouldNotBeLessThanZero", message: "attachment too large for simple upload" } } };
+      }
+      message.attachments.push({ id: `att${message.attachments.length}`, ...attachment });
+      return { status: 201, json: {} };
+    }
+    const attachmentDelete = sub.match(/^\/attachments\/(.+)$/);
+    if (method === "DELETE" && attachmentDelete !== null) {
+      const index = message.attachments.findIndex((a) => a.id === attachmentDelete[1]);
+      if (index >= 0) message.attachments.splice(index, 1);
+      return { status: 204, json: {} };
+    }
+    return { status: 404, json: { error: { code: "fakeGraph: unhandled write route", sub } } };
   }
 
   async start(): Promise<string> {
