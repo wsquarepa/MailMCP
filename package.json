@@ -1,0 +1,36 @@
+{
+  "name": "mailmcp",
+  "version": "0.1.0",
+  "description": "MCP server fronting IMAP/SMTP and Microsoft Graph mailboxes for AI agents",
+  "license": "MIT",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "bin": { "mailmcp": "dist/cli.js" },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:contract": "vitest run tests/contract",
+    "test:e2e": "vitest run tests/e2e"
+  },
+  "dependencies": {
+    "@azure/msal-node": "^2.16.0",
+    "@modelcontextprotocol/sdk": "^1.10.0",
+    "html-to-text": "^9.0.5",
+    "imapflow": "^1.0.170",
+    "mailparser": "^3.7.0",
+    "nodemailer": "^6.9.16",
+    "pino": "^9.5.0",
+    "yaml": "^2.6.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/html-to-text": "^9.0.4",
+    "@types/mailparser": "^3.4.5",
+    "@types/node": "^22.10.0",
+    "@types/nodemailer": "^6.4.17",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}
