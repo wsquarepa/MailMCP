@@ -1,7 +1,7 @@
 import { createServer, type Server } from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AuthExpiredError, BackendUnavailableError } from "../../src/errors.js";
-import { GraphHttpError, graphRequest } from "../../src/graph/client.js";
+import { GraphHttpError, graphRequest, graphRequestOnce } from "../../src/graph/client.js";
 
 let server: Server;
 let baseUrl = "";
@@ -77,5 +77,20 @@ describe("graphRequest", () => {
   it("requests immutable ids on every call", async () => {
     const result = await graphRequest<{ prefer: string }>(connection(), "GET", "/echo-prefer", null);
     expect(result.prefer).toBe('IdType="ImmutableId"');
+  });
+});
+
+describe("graphRequestOnce", () => {
+  it("does not retry a 503: exactly one hit, throws BackendUnavailableError", async () => {
+    hits = 0;
+    await expect(graphRequestOnce(connection(), "POST", "/always-503", null))
+      .rejects.toThrow(BackendUnavailableError);
+    expect(hits).toBe(1);
+  });
+  it("still retries a 429 with Retry-After and succeeds", async () => {
+    hits = 0;
+    const result = await graphRequestOnce<{ ok: boolean }>(connection(), "POST", "/retry-then-ok", null);
+    expect(result.ok).toBe(true);
+    expect(hits).toBe(3);
   });
 });

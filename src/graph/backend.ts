@@ -9,7 +9,7 @@ import type {
   Address, AttachmentContent, AttachmentMeta, BulkResult, DraftInput, Folder,
   ListOptions, MailBackend, MessageFull, MessageSummary, SearchOptions, SendResult,
 } from "../types.js";
-import { GraphHttpError, graphRequest, type GraphConnection } from "./client.js";
+import { GraphHttpError, graphRequest, graphRequestOnce, type GraphConnection } from "./client.js";
 import { decodeShortId, encodeShortId, matchesShortId } from "./shortid.js";
 
 export type GraphMailboxConfig = Extract<MailboxConfig, { backend: "graph" }>;
@@ -82,6 +82,24 @@ export class GraphBackend implements MailBackend {
   ): Promise<T> {
     try {
       return await graphRequest<T>(this.connection, method, path, body);
+    } catch (error) {
+      if (error instanceof GraphHttpError && error.status === 404 && notFoundId !== null) {
+        throw new NotFoundError(notFoundId);
+      }
+      throw error;
+    }
+  }
+
+  // Same as request(), but for the non-idempotent POSTs (send, move,
+  // createReply, create draft, attachment upload) that must never be blindly
+  // replayed on a dropped connection or 5xx.
+  private async requestOnce<T>(
+    path: string,
+    body: object | null,
+    notFoundId: string | null,
+  ): Promise<T> {
+    try {
+      return await graphRequestOnce<T>(this.connection, "POST", path, body);
     } catch (error) {
       if (error instanceof GraphHttpError && error.status === 404 && notFoundId !== null) {
         throw new NotFoundError(notFoundId);
@@ -377,7 +395,7 @@ export class GraphBackend implements MailBackend {
 
   private async addAttachments(nativeId: string, id: string, input: DraftInput): Promise<void> {
     for (const attachment of input.attachments ?? []) {
-      await this.request("POST", `/me/messages/${encodeURIComponent(nativeId)}/attachments`, {
+      await this.requestOnce(`/me/messages/${encodeURIComponent(nativeId)}/attachments`, {
         "@odata.type": "#microsoft.graph.fileAttachment",
         name: attachment.filename,
         contentType: attachment.mimeType,
@@ -391,8 +409,8 @@ export class GraphBackend implements MailBackend {
     let draft: GraphMessage;
     if (input.replyToMessageId !== null) {
       const originalNative = await this.resolveId(input.replyToMessageId);
-      draft = await this.request<GraphMessage>(
-        "POST", `/me/messages/${encodeURIComponent(originalNative)}/createReply`, {}, input.replyToMessageId,
+      draft = await this.requestOnce<GraphMessage>(
+        `/me/messages/${encodeURIComponent(originalNative)}/createReply`, {}, input.replyToMessageId,
       );
       const patch = this.draftPatchBody(input);
       if (Object.keys(patch).length > 0) {
@@ -401,7 +419,7 @@ export class GraphBackend implements MailBackend {
         );
       }
     } else {
-      draft = await this.request<GraphMessage>("POST", "/me/messages", this.draftPatchBody(input), null);
+      draft = await this.requestOnce<GraphMessage>("/me/messages", this.draftPatchBody(input), null);
     }
     await this.addAttachments(draft.id, draft.id, input);
     return this.shortIdFor(draft);
@@ -445,7 +463,7 @@ export class GraphBackend implements MailBackend {
     if (recipients.length === 0) {
       throw new InvalidInputError(`draft ${id} has no recipients; update_draft it with a 'to' first`);
     }
-    await this.request("POST", `/me/messages/${encodeURIComponent(nativeId)}/send`, {}, id);
+    await this.requestOnce(`/me/messages/${encodeURIComponent(nativeId)}/send`, {}, id);
     // Graph moves the draft to Sent itself; nothing to reconcile.
     return { recipients, warning: null };
   }
@@ -489,8 +507,8 @@ export class GraphBackend implements MailBackend {
       return { done: [], failed: ids.map((id) => ({ id, reason })) };
     }
     return this.perId(ids, async (nativeId, shortId) => {
-      const moved = await this.request<GraphMessage>(
-        "POST", `/me/messages/${encodeURIComponent(nativeId)}/move`, { destinationId: destination }, shortId,
+      const moved = await this.requestOnce<GraphMessage>(
+        `/me/messages/${encodeURIComponent(nativeId)}/move`, { destinationId: destination }, shortId,
       );
       return { id: shortId, newId: this.shortIdFor(moved) };
     });
@@ -513,8 +531,8 @@ export class GraphBackend implements MailBackend {
 
   async deleteToTrash(ids: string[]): Promise<BulkResult> {
     return this.perId(ids, async (nativeId, shortId) => {
-      const moved = await this.request<GraphMessage>(
-        "POST", `/me/messages/${encodeURIComponent(nativeId)}/move`, { destinationId: "deleteditems" }, shortId,
+      const moved = await this.requestOnce<GraphMessage>(
+        `/me/messages/${encodeURIComponent(nativeId)}/move`, { destinationId: "deleteditems" }, shortId,
       );
       return { id: shortId, newId: this.shortIdFor(moved) };
     });
