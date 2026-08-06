@@ -551,10 +551,115 @@ export class ImapSmtpBackend implements MailBackend {
     });
   }
 
-  async move(_ids: string[], _target: string): Promise<BulkResult> { throw new Error("not implemented"); }
-  async markRead(_ids: string[]): Promise<BulkResult> { throw new Error("not implemented"); }
-  async markUnread(_ids: string[]): Promise<BulkResult> { throw new Error("not implemented"); }
-  async deleteToTrash(_ids: string[]): Promise<BulkResult> { throw new Error("not implemented"); }
+  private async resolveMoveTarget(target: string): Promise<string> {
+    const special = await this.session.specialFolders();
+    if (target === "trash" || (special.trash !== undefined && target === special.trash)) {
+      throw new InvalidInputError("moving to Trash is not allowed; use delete_message instead");
+    }
+    if (target === "junk" || target === "archive") {
+      return this.session.ensureSpecialFolder(target);
+    }
+    if (target === "inbox") return special.inbox ?? "INBOX";
+    const folders = await this.listFolders();
+    const known = folders.find((f) => f.name === target);
+    if (known === undefined) {
+      const names = folders.map((f) => f.name).join(", ");
+      throw new InvalidInputError(`unknown folder '${target}'. Folders: ${names}`);
+    }
+    return known.name;
+  }
+
+  private async perId(
+    ids: string[],
+    operation: (folder: string, uid: number) => Promise<{ id: string; newId: string | null }>,
+  ): Promise<BulkResult> {
+    const result: BulkResult = { done: [], failed: [] };
+    for (const id of ids) {
+      try {
+        const { folder, uid } = parseImapId(id);
+        result.done.push(await operation(folder, uid));
+      } catch (error) {
+        result.failed.push({ id, reason: error instanceof Error ? error.message : String(error) });
+      }
+    }
+    return result;
+  }
+
+  // STORE/MOVE "success" does not prove the uid matched anything; verify
+  // existence explicitly so nonexistent uids always land in `failed`.
+  private async assertUidExists(
+    client: import("imapflow").ImapFlow,
+    folder: string,
+    uid: number,
+  ): Promise<void> {
+    const found = await client.fetchOne(String(uid), { uid: true }, { uid: true });
+    if (found === false) throw new NotFoundError(`${folder}:${uid}`);
+  }
+
+  private async moveOne(
+    folder: string,
+    uid: number,
+    destination: string,
+  ): Promise<{ id: string; newId: string | null }> {
+    return this.session.withClientOnce(async (client) => {
+      const lock = await client.getMailboxLock(folder);
+      try {
+        await this.assertUidExists(client, folder, uid);
+        const moved = await client.messageMove(String(uid), destination, { uid: true });
+        if (moved === false) throw new NotFoundError(`${folder}:${uid}`);
+        const newUid = moved.uidMap?.get(uid);
+        return {
+          id: `${folder}:${uid}`,
+          newId: newUid !== undefined ? `${destination}:${newUid}` : null,
+        };
+      } finally {
+        lock.release();
+      }
+    });
+  }
+
+  async move(ids: string[], target: string): Promise<BulkResult> {
+    let destination: string;
+    try {
+      destination = await this.resolveMoveTarget(target);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      return { done: [], failed: ids.map((id) => ({ id, reason })) };
+    }
+    return this.perId(ids, (folder, uid) => this.moveOne(folder, uid, destination));
+  }
+
+  private async applySeen(
+    folder: string,
+    uid: number,
+    operation: "add" | "remove",
+  ): Promise<{ id: string; newId: string | null }> {
+    return this.session.withClient(async (client) => {
+      const lock = await client.getMailboxLock(folder);
+      try {
+        await this.assertUidExists(client, folder, uid);
+        if (operation === "add") await client.messageFlagsAdd(String(uid), ["\\Seen"], { uid: true });
+        else await client.messageFlagsRemove(String(uid), ["\\Seen"], { uid: true });
+        const id = `${folder}:${uid}`;
+        return { id, newId: id };
+      } finally {
+        lock.release();
+      }
+    });
+  }
+
+  async markRead(ids: string[]): Promise<BulkResult> {
+    return this.perId(ids, (folder, uid) => this.applySeen(folder, uid, "add"));
+  }
+
+  async markUnread(ids: string[]): Promise<BulkResult> {
+    return this.perId(ids, (folder, uid) => this.applySeen(folder, uid, "remove"));
+  }
+
+  async deleteToTrash(ids: string[]): Promise<BulkResult> {
+    const trash = await this.session.ensureSpecialFolder("trash");
+    return this.perId(ids, (folder, uid) => this.moveOne(folder, uid, trash));
+  }
 
   async close(): Promise<void> {
     await this.session.close();
