@@ -10,9 +10,9 @@ services:
       GRAPH_TOKEN_CACHE_DIR: /data/graph-tokens
       # Every ${VAR} referenced in config.yml must be provided here (or via an
       # env file), for example:
-      # IMAP_PASS_HERMES: ${IMAP_PASS_HERMES}
+      # IMAP_PASS_PERSONAL: ${IMAP_PASS_PERSONAL}
       # IMAP_PASS_SHARED: ${IMAP_PASS_SHARED}
-      # MCP_KEY_HERMES: ${MCP_KEY_HERMES}
+      # MCP_KEY_MY_AGENT: ${MCP_KEY_MY_AGENT}
     volumes:
       - ./config.yml:/data/config.yml:ro
       - ./graph-tokens:/data/graph-tokens

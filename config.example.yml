@@ -1,27 +1,45 @@
-# `${ENV}` values are interpolated from environment variables when this file loads.
-# `secure: true` means implicit TLS.
-mailboxes:
-  hermes:
-    backend: imap
-    address: "Personal Agent <agent@example.org>"
-    imap: { host: imap.example.com, port: 993, secure: true, user: agent@example.org, pass: "${IMAP_PASS_HERMES}" }
-    smtp: { host: smtp.example.com, port: 465, secure: true, user: agent@example.org, pass: "${IMAP_PASS_HERMES}" }
-    surface_headers: [X-Spam-Score, X-Spam-Status]
-  school:
-    backend: graph
-    address: "Example User <user@example.edu>"
-    graph: { tenant_id: "...", client_id: "..." }
-  shared:
-    backend: imap
-    address: "Agent Pool <agents@example.org>"
-    imap: { host: imap.example.com, port: 993, secure: true, user: agents@example.org, pass: "${IMAP_PASS_SHARED}" }
-    smtp: { host: smtp.example.com, port: 465, secure: true, user: agents@example.org, pass: "${IMAP_PASS_SHARED}" }
-    public: [read, draft]        # baseline permissions every key receives
+# MailMCP configuration template.
+# Copy this file to config.yml, then uncomment and edit the blocks you need;
+# nothing in this file is active until uncommented.
+#
+# - `${VAR}` values are interpolated from environment variables at load time.
+# - `secure: true` means implicit TLS.
+# - Permission vocabulary: read, draft, send, organize, delete (docs/permission.md).
+#
+# A configuration needs at least one mailbox and one key.
 
-keys:
-  - name: hermes                 # appears in logs and permission errors
-    token: "${MCP_KEY_HERMES}"
-    default_mailbox: hermes
-    grants:
-      hermes: [read, draft, send, organize, delete]
-      school: [read, organize]
+# mailboxes:
+#
+#   # An IMAP/SMTP mailbox.
+#   personal:
+#     backend: imap
+#     address: "Display Name <you@example.com>"
+#     imap: { host: imap.example.com, port: 993, secure: true, user: you@example.com, pass: "${IMAP_PASS_PERSONAL}" }
+#     smtp: { host: smtp.example.com, port: 465, secure: true, user: you@example.com, pass: "${IMAP_PASS_PERSONAL}" }
+#     # Optional: provider-specific headers to surface in message views.
+#     surface_headers: [X-Spam-Score]
+#
+#   # A Microsoft Graph mailbox (app registration and auth: docs/graph.md).
+#   work:
+#     backend: graph
+#     address: "Display Name <you@example.edu>"
+#     graph: { tenant_id: "<azure tenant id>", client_id: "<azure app client id>" }
+#
+#   # `public` grants baseline permissions on this mailbox to every key.
+#   shared:
+#     backend: imap
+#     address: "Agent Pool <shared@example.com>"
+#     imap: { host: imap.example.com, port: 993, secure: true, user: shared@example.com, pass: "${IMAP_PASS_SHARED}" }
+#     smtp: { host: smtp.example.com, port: 465, secure: true, user: shared@example.com, pass: "${IMAP_PASS_SHARED}" }
+#     public: [read, draft]
+
+# keys:
+#
+#   # One entry per agent; `name` appears in logs and permission errors.
+#   - name: my-agent
+#     token: "${MCP_KEY_MY_AGENT}"
+#     default_mailbox: personal
+#     # Effective permissions = the mailbox's `public` list union these grants.
+#     grants:
+#       personal: [read, draft, send, organize, delete]
+#       work: [read, organize]
