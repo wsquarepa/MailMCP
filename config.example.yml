@@ -1,12 +1,18 @@
-# MailMCP configuration template.
-# Copy this file to config.yml, then uncomment and edit the blocks you need;
-# nothing in this file is active until uncommented.
+#  ██████   ██████            ███  ████  ██████   ██████   █████████  ███████████
+# ▒▒██████ ██████            ▒▒▒  ▒▒███ ▒▒██████ ██████   ███▒▒▒▒▒███▒▒███▒▒▒▒▒███
+#  ▒███▒█████▒███   ██████   ████  ▒███  ▒███▒█████▒███  ███     ▒▒▒  ▒███    ▒███
+#  ▒███▒▒███ ▒███  ▒▒▒▒▒███ ▒▒███  ▒███  ▒███▒▒███ ▒███ ▒███          ▒██████████
+#  ▒███ ▒▒▒  ▒███   ███████  ▒███  ▒███  ▒███ ▒▒▒  ▒███ ▒███          ▒███▒▒▒▒▒▒
+#  ▒███      ▒███  ███▒▒███  ▒███  ▒███  ▒███      ▒███ ▒▒███     ███ ▒███
+#  █████     █████▒▒████████ █████ █████ █████     █████ ▒▒█████████  █████
+# ▒▒▒▒▒     ▒▒▒▒▒  ▒▒▒▒▒▒▒▒ ▒▒▒▒▒ ▒▒▒▒▒ ▒▒▒▒▒     ▒▒▒▒▒   ▒▒▒▒▒▒▒▒▒  ▒▒▒▒▒
+#
 #
 # - `${VAR}` values are interpolated from environment variables at load time.
 # - `secure: true` means implicit TLS.
-# - Permission vocabulary: read, draft, send, organize, delete (docs/permission.md).
+# - Permission vocabulary is available at https://github.com/wsquarepa/MailMCP/blob/master/docs/permission.md
 #
-# A configuration needs at least one mailbox and one key.
+# A configuration needs at least one mailbox and one key!
 
 # mailboxes:
 #
@@ -19,8 +25,9 @@
 #     # Optional: provider-specific headers to surface in message views.
 #     surface_headers: [X-Spam-Score]
 #
-#   # A Microsoft Graph mailbox (app registration and auth: docs/graph.md).
-#   work:
+#   # A Microsoft Graph mailbox.
+#   # View https://github.com/wsquarepa/MailMCP/blob/master/docs/graph.md for more information.
+#   school:
 #     backend: graph
 #     address: "Display Name <you@example.edu>"
 #     graph: { tenant_id: "<azure tenant id>", client_id: "<azure app client id>" }
@@ -42,4 +49,4 @@
 #     # Effective permissions = the mailbox's `public` list union these grants.
 #     grants:
 #       personal: [read, draft, send, organize, delete]
-#       work: [read, organize]
+#       school: [read, organize]
