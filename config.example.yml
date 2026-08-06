@@ -1,0 +1,27 @@
+# `${ENV}` values are interpolated from environment variables when this file loads.
+# `secure: true` means implicit TLS.
+mailboxes:
+  hermes:
+    backend: imap
+    address: "Personal Agent <agent@example.org>"
+    imap: { host: imap.example.com, port: 993, secure: true, user: agent@example.org, pass: "${IMAP_PASS_HERMES}" }
+    smtp: { host: smtp.example.com, port: 465, secure: true, user: agent@example.org, pass: "${IMAP_PASS_HERMES}" }
+    surface_headers: [X-Spam-Score, X-Spam-Status]
+  school:
+    backend: graph
+    address: "Example User <user@example.edu>"
+    graph: { tenant_id: "...", client_id: "..." }
+  shared:
+    backend: imap
+    address: "Agent Pool <agents@example.org>"
+    imap: { host: imap.example.com, port: 993, secure: true, user: agents@example.org, pass: "${IMAP_PASS_SHARED}" }
+    smtp: { host: smtp.example.com, port: 465, secure: true, user: agents@example.org, pass: "${IMAP_PASS_SHARED}" }
+    public: [read, draft]        # baseline permissions every key receives
+
+keys:
+  - name: hermes                 # appears in logs and permission errors
+    token: "${MCP_KEY_HERMES}"
+    default_mailbox: hermes
+    grants:
+      hermes: [read, draft, send, organize, delete]
+      school: [read, organize]

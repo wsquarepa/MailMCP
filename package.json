@@ -2,7 +2,7 @@
   "name": "mailmcp",
   "version": "0.1.0",
   "description": "MCP server fronting IMAP/SMTP and Microsoft Graph mailboxes for AI agents",
-  "license": "MIT",
+  "license": "GPL-3.0-only",
   "type": "module",
   "engines": { "node": ">=20" },
   "bin": { "mailmcp": "dist/cli.js" },
