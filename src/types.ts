@@ -81,6 +81,7 @@ export interface ListOptions {
 }
 
 export interface SearchOptions {
+  folder: string | null;
   query: string | null;
   from: string | null;
   subject: string | null;
