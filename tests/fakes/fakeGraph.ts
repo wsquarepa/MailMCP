@@ -43,7 +43,15 @@ function fullJson(m: FakeMessage): Record<string, unknown> {
     createdDateTime: renderSecond(m.createdAtMs),
     bodyPreview: m.body.slice(0, 255),
     body: { contentType: m.bodyType, content: m.body },
-    internetMessageHeaders: Object.entries(m.headers).map(([name, value]) => ({ name, value })),
+    // Real Graph always returns baseline internet message headers; seeded
+    // custom headers are appended to them.
+    internetMessageHeaders: [
+      { name: "From", value: `${m.fromName} <${m.fromAddress}>` },
+      { name: "Subject", value: m.subject },
+      { name: "Message-ID", value: `<${m.id}@fake.graph>` },
+      { name: "Date", value: new Date(m.receivedAtMs ?? m.createdAtMs).toUTCString() },
+      ...Object.entries(m.headers).map(([name, value]) => ({ name, value })),
+    ],
     parentFolderId: folderId(m.folder),
   };
 }
