@@ -14,6 +14,19 @@ const CONFIG = {
 
 const hash4 = (s: string): string => createHash("sha256").update(s).digest("hex").slice(0, 4);
 
+// Deterministic birthday-collision search over sha256(counter) hash4 prefixes
+// (16-bit space): finds a colliding pair in-process, no network, no randomness.
+function findHash4Collision(): { a: string; b: string } {
+  const seen = new Map<string, string>();
+  for (let i = 0; ; i += 1) {
+    const id = `collide-${i}`;
+    const h = hash4(id);
+    const existing = seen.get(h);
+    if (existing !== undefined) return { a: existing, b: id };
+    seen.set(h, id);
+  }
+}
+
 describe("GraphBackend reads (fake Graph)", () => {
   const fake = new FakeGraph();
   let backend: GraphBackend;
@@ -77,20 +90,15 @@ describe("GraphBackend reads (fake Graph)", () => {
 
   it("throws AmbiguousIdError when two same-second messages collide on hash4", async () => {
     const collisionSecond = new Date("2026-08-06T19:30:00.100Z");
+    const { a: idA, b: idB } = findHash4Collision();
     const firstId = fake.seed({
       folder: "inbox", subject: "collide-1", fromName: "A", fromAddress: "a@x.test",
-      body: "one", isRead: true, receivedAt: collisionSecond, headers: {},
+      body: "one", isRead: true, receivedAt: collisionSecond, headers: {}, id: idA,
     });
-    // Brute-force a second seeded message whose native id shares hash4 (65k
-    // space; ~a few hundred draws). FakeGraph.seed returns the generated id,
-    // so re-seed until collision.
-    let secondId = "";
-    while (secondId === "" || hash4(secondId) !== hash4(firstId)) {
-      secondId = fake.seed({
-        folder: "inbox", subject: "collide-2", fromName: "B", fromAddress: "b@x.test",
-        body: "two", isRead: true, receivedAt: collisionSecond, headers: {},
-      });
-    }
+    fake.seed({
+      folder: "inbox", subject: "collide-2", fromName: "B", fromAddress: "b@x.test",
+      body: "two", isRead: true, receivedAt: collisionSecond, headers: {}, id: idB,
+    });
     backend.clearIdCache();
     const shortId = encodeShortId(firstId, collisionSecond);
     await expect(backend.getMessage(shortId)).rejects.toThrow(AmbiguousIdError);

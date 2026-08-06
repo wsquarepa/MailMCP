@@ -4,6 +4,8 @@ import { createServer, type Server } from "node:http";
 export interface FakeMessageInput {
   folder: string; subject: string; fromName: string; fromAddress: string;
   body: string; isRead: boolean; receivedAt: Date; headers: Record<string, string>;
+  // Overrides the generated native id; lets callers construct id collisions deterministically.
+  id?: string;
 }
 
 export interface FakeMessage {
@@ -74,7 +76,7 @@ export class FakeGraph {
   private readonly messages: FakeMessage[] = [];
 
   seed(input: FakeMessageInput): string {
-    const id = `AAMk${randomUUID()}=`;
+    const id = input.id ?? `AAMk${randomUUID()}=`;
     this.messages.push({
       id, folder: input.folder, subject: input.subject,
       fromName: input.fromName, fromAddress: input.fromAddress,
