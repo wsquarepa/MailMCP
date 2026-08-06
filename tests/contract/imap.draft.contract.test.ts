@@ -3,6 +3,14 @@ import { ImapSmtpBackend } from "../../src/imap/backend.js";
 import { InvalidInputError } from "../../src/errors.js";
 import { imapMailboxConfig, seedMessage } from "../helpers/greenmail.js";
 
+// Exposes the private, side-effect-free header-stripping regex for direct
+// testing against synthetic header blocks (no GreenMail connection needed).
+class ExposedBackend extends ImapSmtpBackend {
+  public stripBcc(source: Buffer): Buffer {
+    return this.stripBccHeader(source);
+  }
+}
+
 const EMPTY = {
   replyToMessageId: null, to: null, cc: null, bcc: null,
   subject: null, body: null, attachments: null,
@@ -87,5 +95,16 @@ describe("ImapSmtpBackend drafts (requires GreenMail)", () => {
     const revisedId = await backend.updateDraft(replyId, { ...EMPTY, body: "A better reply." });
     const revised = await backend.getMessage(revisedId);
     expect(revised.rawHeaders.toLowerCase()).toContain("in-reply-to");
+  });
+
+  it("strips Bcc even when it is the final header line, with no trailing CRLF before the blank separator", () => {
+    const exposed = new ExposedBackend("test", imapMailboxConfig());
+    const source = Buffer.from(
+      "From: a@x.test\r\nTo: b@x.test\r\nBcc: x@y.z\r\n\r\nBody text.",
+      "utf8",
+    );
+    const wire = exposed.stripBcc(source).toString("utf8");
+    expect(/^bcc:/im.test(wire)).toBe(false);
+    expect(wire).toBe("From: a@x.test\r\nTo: b@x.test\r\n\r\nBody text.");
   });
 });

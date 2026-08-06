@@ -511,11 +511,16 @@ export class ImapSmtpBackend implements MailBackend {
   }
 
   // Removes Bcc (with folded continuations) from the header block only.
-  private stripBccHeader(source: Buffer): Buffer {
+  protected stripBccHeader(source: Buffer): Buffer {
     const splitAt = source.indexOf("\r\n\r\n");
     if (splitAt < 0) return source;
     const header = source.subarray(0, splitAt).toString("utf8");
-    const cleaned = header.replace(/^bcc:.*(?:\r\n[ \t].*)*\r\n?/gim, "").replace(/\r\n$/, "");
+    // The CRLF group must be wholly optional ((?:\r\n)?), not just its \n
+    // half (\r\n?): a Bcc header that is the LAST header in the block has no
+    // trailing CRLF in this substring (the header/body separator's CRLF was
+    // split off by the caller), and \r\n? still requires a literal \r,
+    // so it would fail to match at all and let the header survive to the wire.
+    const cleaned = header.replace(/^bcc:.*(?:\r\n[ \t].*)*(?:\r\n)?/gim, "").replace(/\r\n$/, "");
     return Buffer.concat([Buffer.from(cleaned, "utf8"), source.subarray(splitAt)]);
   }
 
