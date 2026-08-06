@@ -82,10 +82,7 @@ describe("loadConfig", () => {
     expect(() => loadConfig(writeTemp(dupName), ENV)).toThrow(ConfigError);
   });
   it("preserves YAML metacharacters in interpolated secrets", () => {
-    const previous = process.env.MAILMCP_TEST_SECRET;
-    process.env.MAILMCP_TEST_SECRET = `pa" #ss`;
-    try {
-      const content = `
+    const content = `
 mailboxes:
   hermes:
     backend: imap
@@ -109,17 +106,10 @@ keys:
     grants:
       hermes: [read]
 `;
-      const env = { ...ENV, MAILMCP_TEST_SECRET: process.env.MAILMCP_TEST_SECRET };
-      const config = loadConfig(writeTemp(content), env);
-      const hermes = config.mailboxes["hermes"];
-      expect(hermes?.backend).toBe("imap");
-      if (hermes?.backend === "imap") expect(hermes.imap.pass).toBe(`pa" #ss`);
-    } finally {
-      if (previous === undefined) {
-        delete process.env.MAILMCP_TEST_SECRET;
-      } else {
-        process.env.MAILMCP_TEST_SECRET = previous;
-      }
-    }
+    const env = { ...ENV, MAILMCP_TEST_SECRET: `pa" #ss` };
+    const config = loadConfig(writeTemp(content), env);
+    const hermes = config.mailboxes["hermes"];
+    expect(hermes?.backend).toBe("imap");
+    if (hermes?.backend === "imap") expect(hermes.imap.pass).toBe(`pa" #ss`);
   });
 });

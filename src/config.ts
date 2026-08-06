@@ -53,12 +53,9 @@ export type Config = z.infer<typeof configSchema>;
 export type MailboxConfig = z.infer<typeof mailboxSchema>;
 export type KeyConfig = z.infer<typeof keySchema>;
 
-export function interpolateEnv(raw: string): string;
-export function interpolateEnv(raw: string, env: NodeJS.ProcessEnv): string;
-export function interpolateEnv(raw: string, env?: NodeJS.ProcessEnv): string {
-  const sourceEnv = env === undefined ? process.env : env;
+export function interpolateEnv(raw: string, env: NodeJS.ProcessEnv): string {
   return raw.replace(/\$\{([A-Za-z0-9_]+)\}/g, (_match, name: string) => {
-    const value = sourceEnv[name];
+    const value = env[name];
     if (value === undefined) {
       throw new ConfigError(`Config references undefined environment variable ${name}`);
     }
