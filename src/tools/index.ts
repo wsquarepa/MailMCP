@@ -1,0 +1,318 @@
+import addressparser from "nodemailer/lib/addressparser/index.js";
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { z } from "zod";
+import { accessibleMailboxes, requirePermission } from "../auth.js";
+import type { Permission } from "../config.js";
+import { InvalidInputError, ToolError } from "../errors.js";
+import { logger } from "../logger.js";
+import { ATTACHMENT_MAX_BYTES } from "../mail/clean.js";
+import {
+  formatAccounts, formatBulk, formatFolders, formatListing, formatMessage,
+} from "../mail/format.js";
+import type { Address, DraftAttachment, DraftInput } from "../types.js";
+import { resolveMailbox, type ToolContext } from "./registry.js";
+
+const TEXT_MIME_PREFIXES = ["text/", "application/json", "application/xml"];
+const CANONICAL_BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
+
+function text(value: string): CallToolResult {
+  return { content: [{ type: "text", text: value }] };
+}
+
+// Every invocation, success or failure, logs one completion line with the
+// key name; bodies, tokens, and passwords never appear in log fields.
+async function runTool(
+  toolName: string,
+  keyName: string,
+  mailbox: string | null,
+  fn: () => Promise<CallToolResult>,
+): Promise<CallToolResult> {
+  const startedAt = performance.now();
+  let isError = false;
+  try {
+    return await fn();
+  } catch (error) {
+    isError = true;
+    if (error instanceof ToolError) {
+      return { isError: true, content: [{ type: "text", text: error.message }] };
+    }
+    logger.error({ key: keyName, tool: toolName, error: String(error) }, "unexpected tool failure");
+    return {
+      isError: true,
+      content: [{ type: "text", text: "Internal server error; the operator should check server logs." }],
+    };
+  } finally {
+    logger.info(
+      { key: keyName, tool: toolName, mailbox, ms: Math.round(performance.now() - startedAt), isError },
+      "tool call completed",
+    );
+  }
+}
+
+function parseRecipients(field: string, raw: string[] | undefined): Address[] | null {
+  if (raw === undefined) return null;
+  return raw.map((entry) => {
+    const parsed = addressparser(entry, { flatten: true });
+    const first = parsed[0];
+    if (parsed.length !== 1 || first === undefined || !(first.address ?? "").includes("@")) {
+      throw new InvalidInputError(`${field} entry '${entry}' is not a valid email address`);
+    }
+    return { name: first.name, address: first.address ?? "" };
+  });
+}
+
+function parseAttachments(
+  raw: { filename: string; mime_type: string; content_base64: string }[] | undefined,
+): DraftAttachment[] | null {
+  if (raw === undefined) return null;
+  return raw.map((a) => {
+    const stripped = a.content_base64.replace(/\s/g, "");
+    if (stripped.length % 4 !== 0 || !CANONICAL_BASE64.test(stripped)) {
+      throw new InvalidInputError(`attachment '${a.filename}': content_base64 is not valid base64`);
+    }
+    return { filename: a.filename, mimeType: a.mime_type, contentBase64: stripped };
+  });
+}
+
+const draftFields = {
+  to: z.array(z.string()).optional(),
+  cc: z.array(z.string()).optional(),
+  bcc: z.array(z.string()).optional(),
+  subject: z.string().optional(),
+  body: z.string().optional(),
+  attachments: z.array(z.object({
+    filename: z.string(), mime_type: z.string(), content_base64: z.string(),
+  })).optional(),
+};
+
+interface DraftArgs {
+  reply_to_message_id?: string | undefined; to?: string[] | undefined; cc?: string[] | undefined; bcc?: string[] | undefined;
+  subject?: string | undefined; body?: string | undefined;
+  attachments?: { filename: string; mime_type: string; content_base64: string }[] | undefined;
+}
+
+function toDraftInput(args: DraftArgs): DraftInput {
+  return {
+    replyToMessageId: args.reply_to_message_id ?? null,
+    to: parseRecipients("to", args.to),
+    cc: parseRecipients("cc", args.cc),
+    bcc: parseRecipients("bcc", args.bcc),
+    subject: args.subject ?? null,
+    body: args.body ?? null,
+    attachments: parseAttachments(args.attachments),
+  };
+}
+
+// Exactly one creation mode: reply (id + body) or fresh (to + subject + body).
+function assertCreateMode(args: DraftArgs): void {
+  if (args.reply_to_message_id !== undefined) {
+    const forbidden = ["to", "cc", "bcc", "subject"].filter((f) => args[f as keyof DraftArgs] !== undefined);
+    if (forbidden.length > 0) {
+      throw new InvalidInputError(
+        `create_draft takes either reply_to_message_id (a reply) or fresh-message fields, not both; remove ${forbidden.join(", ")}`,
+      );
+    }
+    if (args.body === undefined) {
+      throw new InvalidInputError("a reply draft needs a body");
+    }
+    return;
+  }
+  const missing = ["to", "subject", "body"].filter((f) => args[f as keyof DraftArgs] === undefined);
+  if (missing.length > 0) {
+    throw new InvalidInputError(
+      `create_draft needs either reply_to_message_id or a fresh message with to, subject, and body; missing: ${missing.join(", ")}`,
+    );
+  }
+}
+
+export function registerTools(server: McpServer, context: ToolContext): void {
+  const key = context.key;
+  const gate = (mailboxArg: string | undefined, permission: Permission) => {
+    const { name, backend } = resolveMailbox(context, mailboxArg ?? null);
+    requirePermission(context.config, key, name, permission);
+    return { name, backend };
+  };
+
+  server.registerTool("list_accounts", {
+    description: "List the mailboxes this key can access, with permissions and the default mailbox.",
+    inputSchema: {},
+  }, async () => runTool("list_accounts", key.name, null, async () =>
+    text(formatAccounts(accessibleMailboxes(context.config, key))),
+  ));
+
+  server.registerTool("list_folders", {
+    description: "List folders in a mailbox, marking special roles (inbox, junk, trash, archive, drafts, sent).",
+    inputSchema: { mailbox: z.string().optional() },
+  }, async (args) => runTool("list_folders", key.name, args.mailbox ?? null, async () => {
+    const { backend } = gate(args.mailbox, "read");
+    return text(formatFolders(await backend.listFolders()));
+  }));
+
+  server.registerTool("list_messages", {
+    description: "List messages. Defaults: inbox, unread only, newest 20. Each entry has id, sender, subject, date, flags, and a snippet.",
+    inputSchema: {
+      mailbox: z.string().optional(),
+      folder: z.string().optional(),
+      include_read: z.boolean().optional(),
+      limit: z.number().int().min(1).max(100).optional(),
+      offset: z.number().int().min(0).optional(),
+    },
+  }, async (args) => runTool("list_messages", key.name, args.mailbox ?? null, async () => {
+    const { name, backend } = gate(args.mailbox, "read");
+    const options = {
+      folder: args.folder ?? null,
+      includeRead: args.include_read ?? false,
+      limit: args.limit ?? 20,
+      offset: args.offset ?? 0,
+    };
+    const messages = await backend.listMessages(options);
+    const scope = options.includeRead ? "all" : "unread";
+    const note = `showing up to ${options.limit} ${scope}, offset ${options.offset}`;
+    return text(formatListing(name, options.folder ?? "INBOX", messages, note));
+  }));
+
+  server.registerTool("search_messages", {
+    description: "Search one folder (default inbox) by text, sender, subject, or date range.",
+    inputSchema: {
+      mailbox: z.string().optional(),
+      folder: z.string().optional(),
+      query: z.string().optional(),
+      from: z.string().optional(),
+      subject: z.string().optional(),
+      since: z.string().datetime().optional(),
+      before: z.string().datetime().optional(),
+      unread_only: z.boolean().optional(),
+      limit: z.number().int().min(1).max(100).optional(),
+    },
+  }, async (args) => runTool("search_messages", key.name, args.mailbox ?? null, async () => {
+    const { name, backend } = gate(args.mailbox, "read");
+    const hits = await backend.search({
+      folder: args.folder ?? null,
+      query: args.query ?? null,
+      from: args.from ?? null,
+      subject: args.subject ?? null,
+      since: args.since !== undefined ? new Date(args.since) : null,
+      before: args.before !== undefined ? new Date(args.before) : null,
+      unreadOnly: args.unread_only ?? false,
+      limit: args.limit ?? 20,
+    });
+    return text(formatListing(name, args.folder ?? "INBOX", hits, `${hits.length} matches`));
+  }));
+
+  server.registerTool("get_message", {
+    description: "Read a full message: envelope, auth summary (SPF/DKIM/DMARC), cleaned body. Set raw_headers for the complete header block.",
+    inputSchema: {
+      mailbox: z.string().optional(),
+      id: z.string(),
+      raw_headers: z.boolean().optional(),
+    },
+  }, async (args) => runTool("get_message", key.name, args.mailbox ?? null, async () => {
+    const { name, backend } = gate(args.mailbox, "read");
+    return text(formatMessage(name, await backend.getMessage(args.id), args.raw_headers ?? false));
+  }));
+
+  server.registerTool("get_attachment", {
+    description: "Fetch one attachment by message id and index (from get_message). Text types return as text, binary as base64. 10 MB cap.",
+    inputSchema: {
+      mailbox: z.string().optional(),
+      id: z.string(),
+      index: z.number().int().min(0),
+    },
+  }, async (args) => runTool("get_attachment", key.name, args.mailbox ?? null, async () => {
+    const { backend } = gate(args.mailbox, "read");
+    const attachment = await backend.getAttachment(args.id, args.index, ATTACHMENT_MAX_BYTES);
+    if (TEXT_MIME_PREFIXES.some((p) => attachment.mimeType.startsWith(p))) {
+      return text(`${attachment.filename} (${attachment.mimeType}):\n${attachment.content.toString("utf8")}`);
+    }
+    return {
+      content: [{
+        type: "resource",
+        resource: {
+          uri: `attachment://${encodeURIComponent(attachment.filename)}`,
+          mimeType: attachment.mimeType,
+          blob: attachment.content.toString("base64"),
+        },
+      }],
+    };
+  }));
+
+  server.registerTool("create_draft", {
+    description: "Create a draft: either a reply (reply_to_message_id + body; threading and recipients handled server-side) or a fresh message (to + subject + body). Nothing is sent until send_draft.",
+    inputSchema: {
+      mailbox: z.string().optional(),
+      reply_to_message_id: z.string().optional(),
+      ...draftFields,
+    },
+  }, async (args) => runTool("create_draft", key.name, args.mailbox ?? null, async () => {
+    const { backend } = gate(args.mailbox, "draft");
+    assertCreateMode(args);
+    const id = await backend.createDraft(toDraftInput(args));
+    return text(`Draft created with id ${id}. Review with get_message, revise with update_draft, send with send_draft.`);
+  }));
+
+  server.registerTool("update_draft", {
+    description: "Update a draft's provided fields; others are preserved. Returns the draft's CURRENT id; always use the returned id afterwards.",
+    inputSchema: {
+      mailbox: z.string().optional(),
+      draft_id: z.string(),
+      ...draftFields,
+    },
+  }, async (args) => runTool("update_draft", key.name, args.mailbox ?? null, async () => {
+    const { backend } = gate(args.mailbox, "draft");
+    const id = await backend.updateDraft(args.draft_id, toDraftInput(args));
+    return text(`Draft updated; current id is ${id}. Use this id for further updates or send_draft.`);
+  }));
+
+  server.registerTool("send_draft", {
+    description: "Send an existing draft. This is the only way to send mail.",
+    inputSchema: {
+      mailbox: z.string().optional(),
+      draft_id: z.string(),
+    },
+  }, async (args) => runTool("send_draft", key.name, args.mailbox ?? null, async () => {
+    const { backend } = gate(args.mailbox, "send");
+    const sent = await backend.sendDraft(args.draft_id);
+    const rendered = sent.recipients
+      .map((r) => (r.name !== "" ? `${r.name} <${r.address}>` : r.address))
+      .join(", ");
+    const confirmation = `Sent draft ${args.draft_id} to: ${rendered}`;
+    return text(sent.warning !== null ? `${confirmation}\n${sent.warning}` : confirmation);
+  }));
+
+  server.registerTool("move_message", {
+    description: "Move messages to a folder, or the special targets junk/archive/inbox. Trash requires delete_message.",
+    inputSchema: {
+      mailbox: z.string().optional(),
+      ids: z.array(z.string()).min(1),
+      target: z.string(),
+    },
+  }, async (args) => runTool("move_message", key.name, args.mailbox ?? null, async () => {
+    const { backend } = gate(args.mailbox, "organize");
+    return text(formatBulk(`Moved to ${args.target}`, await backend.move(args.ids, args.target)));
+  }));
+
+  server.registerTool("mark_read", {
+    description: "Mark messages as read.",
+    inputSchema: { mailbox: z.string().optional(), ids: z.array(z.string()).min(1) },
+  }, async (args) => runTool("mark_read", key.name, args.mailbox ?? null, async () => {
+    const { backend } = gate(args.mailbox, "organize");
+    return text(formatBulk("Marked read", await backend.markRead(args.ids)));
+  }));
+
+  server.registerTool("mark_unread", {
+    description: "Mark messages as unread.",
+    inputSchema: { mailbox: z.string().optional(), ids: z.array(z.string()).min(1) },
+  }, async (args) => runTool("mark_unread", key.name, args.mailbox ?? null, async () => {
+    const { backend } = gate(args.mailbox, "organize");
+    return text(formatBulk("Marked unread", await backend.markUnread(args.ids)));
+  }));
+
+  server.registerTool("delete_message", {
+    description: "Move messages to Trash. There is no permanent delete.",
+    inputSchema: { mailbox: z.string().optional(), ids: z.array(z.string()).min(1) },
+  }, async (args) => runTool("delete_message", key.name, args.mailbox ?? null, async () => {
+    const { backend } = gate(args.mailbox, "delete");
+    return text(formatBulk("Deleted to Trash", await backend.deleteToTrash(args.ids)));
+  }));
+}
