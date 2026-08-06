@@ -6,6 +6,12 @@ on:
     tags: ["v*"]
   pull_request:
 
+# A superseded run must not finish after a newer one and repoint the edge tag
+# at an older commit.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
