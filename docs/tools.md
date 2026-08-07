@@ -8,10 +8,17 @@
 | `search_messages` | Search one folder by text, sender, subject, or date range. |
 | `get_message` | Read a cleaned message with its envelope and authentication summary, with optional raw headers. |
 | `get_attachment` | Fetch one attachment as text or base64, subject to the 10 MB cap. |
-| `create_draft` | Create a fresh or server-threaded reply draft without sending it. |
-| `update_draft` | Update supplied draft fields while preserving the others, and return the current draft ID. |
+| `create_draft` | Create a fresh or server-threaded reply draft without sending it; attachments are passed by reference. |
+| `update_draft` | Update supplied draft fields while preserving the others, and return the current draft ID; providing attachments replaces the set. |
 | `send_draft` | Send an existing draft, which is the only way MailMCP sends mail. |
 | `move_message` | Move messages to a folder or to junk, archive, or inbox. |
 | `mark_read` | Mark messages as read. |
 | `mark_unread` | Mark messages as unread. |
 | `delete_message` | Move messages to Trash without permanently deleting them. |
+
+## Outgoing attachments
+
+Attachment bytes never travel through tool arguments. Each `attachments` entry in `create_draft` and `update_draft` is one of:
+
+- `{ filename, mime_type, upload_id }` — bytes staged beforehand over HTTP: `POST /upload` with the raw file as the request body and the same bearer token, answered with `{ upload_id, size, expires_at }`. Uploads are capped at 3 MB each, expire after 30 minutes, are visible only to the key that staged them, and count toward a 30 MB per-key quota of live staged bytes. Staged uploads are lost on server restart.
+- `{ source_message_id, source_index, filename? }` — copies an attachment from an existing message in the same mailbox (indexes come from `get_message`); requires `read` permission. `filename` overrides the source's name.
