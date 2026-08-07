@@ -6,6 +6,7 @@ import { GraphTokenProvider } from "./graph/tokens.js";
 import { logger } from "./logger.js";
 import { startServer } from "./server.js";
 import { buildBackends, closeBackends } from "./tools/registry.js";
+import { UploadStore } from "./uploads.js";
 
 const USAGE = [
   "Usage:",
@@ -56,7 +57,7 @@ async function serve(): Promise<void> {
   const config = loadConfigFromEnv();
   const port = validatePort(requiredEnv("PORT"));
   const backends = buildBackends(config, graphCacheDir(config));
-  const server = await startServer({ config, port, backends });
+  const server = await startServer({ config, port, backends, uploads: new UploadStore() });
   const shutdown = (signal: string): void => {
     logger.info({ signal }, "shutting down");
     void server.close().then(() => closeBackends(backends)).then(() => process.exit(0));

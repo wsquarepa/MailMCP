@@ -7,6 +7,7 @@ import { ImapSmtpBackend } from "../../src/imap/backend.js";
 import { startServer } from "../../src/server.js";
 import { closeBackends } from "../../src/tools/registry.js";
 import type { MailBackend } from "../../src/types.js";
+import { UPLOAD_MAX_BYTES, UploadStore } from "../../src/uploads.js";
 import { imapMailboxConfig, seedMessage } from "../helpers/greenmail.js";
 
 const CONFIG: Config = {
@@ -16,6 +17,8 @@ const CONFIG: Config = {
       grants: { hermes: ["read", "draft", "send", "organize", "delete"] } },
     { name: "reader", token: "tok-reader-0123456789", default_mailbox: "hermes",
       grants: { hermes: ["read"] } },
+    { name: "uploader", token: "tok-upload-0123456789", default_mailbox: "hermes",
+      grants: { hermes: ["draft"] } },
   ],
 };
 
@@ -43,7 +46,7 @@ describe("server e2e (requires GreenMail)", () => {
 
   beforeAll(async () => {
     backends = new Map([["hermes", new ImapSmtpBackend("hermes", imapMailboxConfig())]]);
-    const started = await startServer({ config: CONFIG, port: 0, backends });
+    const started = await startServer({ config: CONFIG, port: 0, backends, uploads: new UploadStore() });
     close = started.close;
     baseUrl = `http://localhost:${started.port}`;
     await seedMessage(subject, "e2e body", {}, []);
@@ -88,6 +91,68 @@ describe("server e2e (requires GreenMail)", () => {
       body: `{"pad":"${"x".repeat(2 * 1024 * 1024)}"}`,
     });
     expect(response.status).toBe(413);
+  });
+
+  it("upload endpoint rejects unknown tokens, non-POST, and keys without draft", async () => {
+    const noAuth = await fetch(`${baseUrl}/upload`, { method: "POST", body: Buffer.from("x") });
+    expect(noAuth.status).toBe(401);
+    const reader = await fetch(`${baseUrl}/upload`, {
+      method: "POST",
+      headers: { authorization: "Bearer tok-reader-0123456789" },
+      body: Buffer.from("x"),
+    });
+    expect(reader.status).toBe(403);
+    expect(((await reader.json()) as { error: string }).error).toContain("draft");
+    const wrongMethod = await fetch(`${baseUrl}/upload`, {
+      headers: { authorization: "Bearer tok-hermes-0123456789" },
+    });
+    expect(wrongMethod.status).toBe(405);
+  });
+
+  it("upload endpoint rejects empty and oversized bodies", async () => {
+    const empty = await fetch(`${baseUrl}/upload`, {
+      method: "POST",
+      headers: { authorization: "Bearer tok-hermes-0123456789" },
+    });
+    expect(empty.status).toBe(400);
+    const oversized = await fetch(`${baseUrl}/upload`, {
+      method: "POST",
+      headers: { authorization: "Bearer tok-hermes-0123456789" },
+      body: Buffer.alloc(UPLOAD_MAX_BYTES + 1),
+    });
+    expect(oversized.status).toBe(413);
+  });
+
+  it("upload endpoint stages bytes and returns a receipt", async () => {
+    const response = await fetch(`${baseUrl}/upload`, {
+      method: "POST",
+      headers: { authorization: "Bearer tok-hermes-0123456789" },
+      body: Buffer.from("receipt bytes"),
+    });
+    expect(response.status).toBe(201);
+    const receipt = (await response.json()) as { upload_id: string; size: number; expires_at: string };
+    expect(receipt.upload_id).toMatch(/^[0-9a-f]{32}$/);
+    expect(receipt.size).toBe(13);
+    expect(Date.parse(receipt.expires_at)).toBeGreaterThan(Date.now());
+  });
+
+  it("upload endpoint enforces the per-key quota with 429", async () => {
+    const chunk = Buffer.alloc(UPLOAD_MAX_BYTES);
+    for (let i = 0; i < 10; i += 1) {
+      const ok = await fetch(`${baseUrl}/upload`, {
+        method: "POST",
+        headers: { authorization: "Bearer tok-upload-0123456789" },
+        body: chunk,
+      });
+      expect(ok.status).toBe(201);
+    }
+    const over = await fetch(`${baseUrl}/upload`, {
+      method: "POST",
+      headers: { authorization: "Bearer tok-upload-0123456789" },
+      body: Buffer.from("one more byte"),
+    });
+    expect(over.status).toBe(429);
+    expect(((await over.json()) as { error: string }).error).toContain("quota");
   });
 
   it("completes the triage flow: list unread, read, move to junk", async () => {
