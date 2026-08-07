@@ -196,6 +196,69 @@ describe("server e2e (requires GreenMail)", () => {
     await client.close();
   });
 
+  it("stages bytes via /upload and attaches them to a draft", async () => {
+    const staged = await fetch(`${baseUrl}/upload`, {
+      method: "POST",
+      headers: { authorization: "Bearer tok-hermes-0123456789" },
+      body: Buffer.from("staged attachment bytes"),
+    });
+    expect(staged.status).toBe(201);
+    const receipt = (await staged.json()) as { upload_id: string };
+    const { client, transport } = clientFor(baseUrl, "tok-hermes-0123456789");
+    await client.connect(transport);
+    const created = await client.callTool({
+      name: "create_draft",
+      arguments: {
+        to: ["Agent <agent@example.test>"], subject: `${subject}-staged`, body: "see attachment",
+        attachments: [{ filename: "note.txt", mime_type: "text/plain", upload_id: receipt.upload_id }],
+      },
+    });
+    const draftId = textOf(created).match(/id (\S+)\./)?.[1];
+    expect(draftId).toBeDefined();
+    const fetched = await client.callTool({ name: "get_attachment", arguments: { id: draftId, index: 0 } });
+    expect(textOf(fetched)).toContain("staged attachment bytes");
+    await client.close();
+  });
+
+  it("forwards an attachment by source reference", async () => {
+    const sourceSubject = `${subject}-fwd-source`;
+    await seedMessage(sourceSubject, "carries a file", {}, [
+      { filename: "fwd.txt", content: Buffer.from("forward me") },
+    ]);
+    const { client, transport } = clientFor(baseUrl, "tok-hermes-0123456789");
+    await client.connect(transport);
+    const listed = await client.callTool({ name: "search_messages", arguments: { subject: sourceSubject } });
+    const sourceId = textOf(listed).match(/\[hermes (INBOX:\d+)\]/)?.[1];
+    expect(sourceId).toBeDefined();
+    const created = await client.callTool({
+      name: "create_draft",
+      arguments: {
+        to: ["Agent <agent@example.test>"], subject: `${subject}-fwd`, body: "forwarding",
+        attachments: [{ source_message_id: sourceId, source_index: 0 }],
+      },
+    });
+    const draftId = textOf(created).match(/id (\S+)\./)?.[1];
+    expect(draftId).toBeDefined();
+    const fetched = await client.callTool({ name: "get_attachment", arguments: { id: draftId, index: 0 } });
+    expect(textOf(fetched)).toContain("forward me");
+    await client.close();
+  });
+
+  it("rejects an unknown upload id with re-upload guidance", async () => {
+    const { client, transport } = clientFor(baseUrl, "tok-hermes-0123456789");
+    await client.connect(transport);
+    const result = await client.callTool({
+      name: "create_draft",
+      arguments: {
+        to: ["Agent <agent@example.test>"], subject: `${subject}-bad`, body: "b",
+        attachments: [{ filename: "f", mime_type: "text/plain", upload_id: "00000000000000000000000000000000" }],
+      },
+    });
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toContain("unknown or expired");
+    await client.close();
+  });
+
   it("enforces permissions end to end", async () => {
     const { client, transport } = clientFor(baseUrl, "tok-reader-0123456789");
     await client.connect(transport);
