@@ -21,6 +21,7 @@ class FakeBackend implements MailBackend {
   calls: string[] = [];
   lastDraft: DraftInput | null = null;
   sendWarning: string | null = null;
+  attachmentContent: Buffer = Buffer.from("hi");
   async listFolders(): Promise<Folder[]> { return [{ name: "INBOX", specialUse: "inbox" }]; }
   async listMessages(options: ListOptions): Promise<MessageSummary[]> {
     this.calls.push(`listMessages:${options.includeRead}:${options.limit}:${options.offset}`);
@@ -36,7 +37,10 @@ class FakeBackend implements MailBackend {
   }
   async getAttachment(_id: string, _index: number, maxBytes: number): Promise<AttachmentContent> {
     this.calls.push(`getAttachment:${maxBytes}`);
-    return { filename: "a.txt", mimeType: "text/plain", size: 2, content: Buffer.from("hi") };
+    return {
+      filename: "a.txt", mimeType: "text/plain",
+      size: this.attachmentContent.length, content: this.attachmentContent,
+    };
   }
   async createDraft(input: DraftInput): Promise<string> { this.lastDraft = input; return "Drafts:9"; }
   async updateDraft(_id: string, input: DraftInput): Promise<string> { this.lastDraft = input; return "Drafts:10"; }
@@ -209,21 +213,44 @@ describe("tool layer", () => {
     expect(backend.lastDraft).toBeNull();
   });
 
-  it("copies source-message attachments through getAttachment under the outgoing cap", async () => {
+  it("copies source-message attachments and enforces the cap on decoded bytes", async () => {
     const backend = new FakeBackend();
     const { client } = await connect(0, backend);
-    const result = await client.callTool({
+    const ok = await client.callTool({
       name: "create_draft",
       arguments: {
         to: ["x@x.test"], subject: "s", body: "b",
         attachments: [{ source_message_id: "INBOX:1", source_index: 0 }],
       },
     });
-    expect(result.isError).toBeFalsy();
-    expect(backend.calls).toContain(`getAttachment:${UPLOAD_MAX_BYTES}`);
+    expect(ok.isError).toBeFalsy();
+    expect(backend.calls).toContain(`getAttachment:${10 * 1024 * 1024}`);
     expect(backend.lastDraft?.attachments).toEqual([
       { filename: "a.txt", mimeType: "text/plain", content: Buffer.from("hi") },
     ]);
+    backend.attachmentContent = Buffer.alloc(UPLOAD_MAX_BYTES + 1);
+    const over = await client.callTool({
+      name: "create_draft",
+      arguments: {
+        to: ["x@x.test"], subject: "s", body: "b",
+        attachments: [{ source_message_id: "INBOX:1", source_index: 0 }],
+      },
+    });
+    expect(over.isError).toBe(true);
+    expect(textOf(over)).toContain(`capped at ${UPLOAD_MAX_BYTES} bytes`);
+  });
+
+  it("rejects more than 10 attachment entries per call", async () => {
+    const backend = new FakeBackend();
+    const { client } = await connect(0, backend);
+    const entries = Array.from({ length: 11 }, () => ({ source_message_id: "INBOX:1", source_index: 0 }));
+    const result = await client.callTool({
+      name: "create_draft",
+      arguments: { to: ["x@x.test"], subject: "s", body: "b", attachments: entries },
+    });
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toContain("at most 10");
+    expect(backend.lastDraft).toBeNull();
   });
 
   it("requires read permission for source-message attachments", async () => {

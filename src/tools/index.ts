@@ -95,6 +95,8 @@ const ATTACHMENT_SHAPES =
   "each attachments entry is either { filename, mime_type, upload_id } for bytes staged via POST /upload, " +
   "or { source_message_id, source_index, filename? } to copy an attachment from an existing message";
 
+const MAX_DRAFT_ATTACHMENTS = 10;
+
 async function resolveAttachments(
   raw: AttachmentArg[] | undefined,
   context: ToolContext,
@@ -102,6 +104,11 @@ async function resolveAttachments(
   backend: MailBackend,
 ): Promise<DraftAttachment[] | null> {
   if (raw === undefined) return null;
+  if (raw.length > MAX_DRAFT_ATTACHMENTS) {
+    throw new InvalidInputError(
+      `${raw.length} attachment entries provided; a draft takes at most ${MAX_DRAFT_ATTACHMENTS} per call. Send fewer or split across messages.`,
+    );
+  }
   const resolved: DraftAttachment[] = [];
   for (const entry of raw) {
     if (entry.upload_id !== undefined && entry.source_message_id === undefined) {
@@ -121,7 +128,13 @@ async function resolveAttachments(
         throw new InvalidInputError(ATTACHMENT_SHAPES);
       }
       requirePermission(context.config, context.key, mailbox, "read");
-      const source = await backend.getAttachment(entry.source_message_id, entry.source_index, UPLOAD_MAX_BYTES);
+      const source = await backend.getAttachment(entry.source_message_id, entry.source_index, ATTACHMENT_MAX_BYTES);
+      if (source.content.length > UPLOAD_MAX_BYTES) {
+        throw new InvalidInputError(
+          `attachment ${entry.source_index} of message ${entry.source_message_id} is ${source.content.length} bytes; ` +
+          `outgoing attachments are capped at ${UPLOAD_MAX_BYTES} bytes, so it cannot be attached to a draft`,
+        );
+      }
       resolved.push({
         filename: entry.filename ?? source.filename,
         mimeType: source.mimeType,
