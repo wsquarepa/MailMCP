@@ -110,8 +110,13 @@ async function handleMcp(
   await transport.handleRequest(request, response, parsed);
 }
 
-function uploadError(response: ServerResponse, status: number, message: string): void {
-  response.writeHead(status, { "content-type": "application/json" });
+function uploadError(
+  response: ServerResponse,
+  status: number,
+  message: string,
+  headers: Record<string, string>,
+): void {
+  response.writeHead(status, { "content-type": "application/json", ...headers });
   response.end(JSON.stringify({ error: message }));
 }
 
@@ -124,19 +129,22 @@ async function handleUpload(
   const token = header.startsWith("Bearer ") ? header.slice("Bearer ".length) : "";
   const key = findKey(options.config, token);
   if (key === null) {
-    uploadError(response, 401, "Unauthorized: missing or unknown bearer token");
+    request.resume();
+    uploadError(response, 401, "Unauthorized: missing or unknown bearer token", {});
     logger.info({ key: null, status: 401 }, "upload rejected");
     return;
   }
   if (request.method !== "POST") {
-    uploadError(response, 405, "Method not allowed; POST raw attachment bytes to /upload");
+    request.resume();
+    uploadError(response, 405, "Method not allowed; POST raw attachment bytes to /upload", { allow: "POST" });
     logger.info({ key: key.name, status: 405 }, "upload rejected");
     return;
   }
   const canDraft = Object.keys(options.config.mailboxes)
     .some((name) => effectivePermissions(options.config, key, name).includes("draft"));
   if (!canDraft) {
-    uploadError(response, 403, `Key '${key.name}' has no 'draft' permission on any mailbox; uploads are only for drafting attachments`);
+    request.resume();
+    uploadError(response, 403, `Key '${key.name}' has no 'draft' permission on any mailbox; uploads are only for drafting attachments`, {});
     logger.info({ key: key.name, status: 403 }, "upload rejected");
     return;
   }
@@ -145,14 +153,14 @@ async function handleUpload(
     bytes = await readBody(request, UPLOAD_MAX_BYTES);
   } catch (error) {
     if (error instanceof BodyTooLargeError) {
-      uploadError(response, 413, `Upload exceeds the ${UPLOAD_MAX_BYTES} byte (3 MB) per-attachment cap`);
+      uploadError(response, 413, `Upload exceeds the ${UPLOAD_MAX_BYTES} byte (3 MB) per-attachment cap`, {});
       logger.info({ key: key.name, status: 413 }, "upload rejected");
       return;
     }
     throw error;
   }
   if (bytes.length === 0) {
-    uploadError(response, 400, "Empty body; POST the raw attachment bytes");
+    uploadError(response, 400, "Empty body; POST the raw attachment bytes", {});
     logger.info({ key: key.name, status: 400 }, "upload rejected");
     return;
   }
@@ -167,7 +175,7 @@ async function handleUpload(
     logger.info({ key: key.name, status: 201, size: receipt.size }, "upload staged");
   } catch (error) {
     if (error instanceof UploadQuotaError) {
-      uploadError(response, 429, error.message);
+      uploadError(response, 429, error.message, {});
       logger.info({ key: key.name, status: 429 }, "upload rejected");
       return;
     }
@@ -185,7 +193,7 @@ export async function startServer(options: ServerOptions): Promise<{ close: () =
     if (request.url === "/upload") {
       handleUpload(options, request, response).catch((error: unknown) => {
         logger.error({ error: String(error) }, "upload request handling failed");
-        if (!response.headersSent) uploadError(response, 500, "Internal error");
+        if (!response.headersSent) uploadError(response, 500, "Internal error", {});
         else response.end();
       });
       return;

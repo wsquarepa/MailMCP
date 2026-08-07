@@ -123,6 +123,16 @@ describe("server e2e (requires GreenMail)", () => {
     expect(oversized.status).toBe(413);
   });
 
+  it("upload endpoint returns a readable error while a large body is still streaming", async () => {
+    const response = await fetch(`${baseUrl}/upload`, {
+      method: "POST",
+      headers: { authorization: "Bearer wrong" },
+      body: Buffer.alloc(UPLOAD_MAX_BYTES),
+    });
+    expect(response.status).toBe(401);
+    expect((((await response.json()) as { error: string }).error)).toContain("bearer token");
+  });
+
   it("upload endpoint stages bytes and returns a receipt", async () => {
     const response = await fetch(`${baseUrl}/upload`, {
       method: "POST",
