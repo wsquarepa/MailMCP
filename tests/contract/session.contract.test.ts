@@ -1,7 +1,8 @@
+import { ImapFlow } from "imapflow";
 import { afterAll, describe, expect, it } from "vitest";
 import { NotFoundError } from "../../src/errors.js";
 import { ImapSession } from "../../src/imap/session.js";
-import { imapMailboxConfig } from "../helpers/greenmail.js";
+import { imapMailboxConfig, TEST_USER } from "../helpers/greenmail.js";
 
 describe("ImapSession (requires GreenMail)", () => {
   const session = new ImapSession("test", imapMailboxConfig());
@@ -43,6 +44,29 @@ describe("ImapSession (requires GreenMail)", () => {
       (await client.list()).map((f) => f.path),
     );
     expect(folders).toContain(drafts);
+  });
+
+  // GreenMail answers a duplicate CREATE with a plain NO (no RFC 5530
+  // ALREADYEXISTS code), like many servers; ensureSpecialFolder must not
+  // surface that as a failure when the folder exists.
+  it("ensureSpecialFolder resolves a role folder created externally after the cache was populated", async () => {
+    const external = new ImapFlow({
+      host: "localhost", port: 3143, secure: false, auth: TEST_USER, logger: false,
+    });
+    await external.connect();
+    const listed = (await external.list()).map((f) => f.path);
+    if (listed.includes("Archive")) await external.mailboxDelete("Archive");
+
+    const stale = new ImapSession("stale-cache", imapMailboxConfig());
+    try {
+      const special = await stale.specialFolders();
+      expect(special.archive).toBeUndefined();
+      await external.mailboxCreate("Archive");
+      await expect(stale.ensureSpecialFolder("archive")).resolves.toBe("Archive");
+    } finally {
+      await stale.close();
+      await external.logout();
+    }
   });
 
   it("survives a dropped connection by reconnecting once", async () => {

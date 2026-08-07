@@ -8,6 +8,8 @@ export interface BackendDescriptor {
   seed: (subject: string, body: string) => Promise<void>;
   bogusId: string;
   selfAddress: Address;
+  draftsFolder: string;
+  sentFolder: string;
 }
 
 const EMPTY = {
@@ -74,6 +76,17 @@ export function runMailBackendContract(descriptor: BackendDescriptor): void {
       expect(draft.subject).toBe(`${marker}-draft`);
       const sent = await backend.sendDraft(updatedId);
       expect(sent.recipients.map((r) => r.address)).toContain(descriptor.selfAddress.address);
+      expect(sent.warning).toBeNull();
+      const inDrafts = await backend.search({
+        folder: descriptor.draftsFolder, query: null, from: null, subject: `${marker}-draft`,
+        since: null, before: null, unreadOnly: false, limit: 5,
+      });
+      expect(inDrafts).toEqual([]);
+      const inSent = await backend.search({
+        folder: descriptor.sentFolder, query: null, from: null, subject: `${marker}-draft`,
+        since: null, before: null, unreadOnly: false, limit: 5,
+      });
+      expect(inSent).toHaveLength(1);
     });
 
     it("rejects trash as a move target and deletes to trash instead", async () => {

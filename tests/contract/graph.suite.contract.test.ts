@@ -25,4 +25,6 @@ runMailBackendContract({
   },
   bogusId: encodeShortId("no-such-native-id", new Date(1_700_000_000_000)),
   selfAddress: { name: "Agent", address: "school@school.test" },
+  draftsFolder: "drafts",
+  sentFolder: "sent",
 });

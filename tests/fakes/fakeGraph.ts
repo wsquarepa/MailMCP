@@ -283,6 +283,9 @@ export class FakeGraph {
       }
       message.folder = "sentitems";
       message.isDraft = false;
+      // Real Graph stamps receivedDateTime on send; keep it equal to
+      // createdDateTime so the message's short id stays resolvable.
+      message.receivedAtMs = message.createdAtMs;
       return { status: 202, json: {} };
     }
     if (method === "POST" && sub === "/move") {

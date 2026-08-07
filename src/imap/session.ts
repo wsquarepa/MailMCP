@@ -119,9 +119,21 @@ export class ImapSession {
     const resolved = (await this.specialFolders())[role];
     if (resolved !== undefined) return resolved;
     const name = CREATE_NAMES[role];
-    await this.withClientOnce(async (client) => {
-      await client.mailboxCreate(name);
-    });
+    try {
+      await this.withClientOnce(async (client) => {
+        await client.mailboxCreate(name);
+      });
+    } catch (error) {
+      // CREATE lost a race with another client: servers without RFC 5530
+      // answer a duplicate CREATE with a plain NO, which ImapFlow cannot
+      // distinguish from a real failure. The cached folder map is stale in
+      // exactly that case, so re-list and fail only if the role is still
+      // missing.
+      this.specialCache = null;
+      const refreshed = (await this.specialFolders())[role];
+      if (refreshed !== undefined) return refreshed;
+      throw error;
+    }
     this.specialCache = null;
     return name;
   }

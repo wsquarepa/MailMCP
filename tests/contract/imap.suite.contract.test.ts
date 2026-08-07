@@ -11,4 +11,6 @@ runMailBackendContract({
   seed: (subject, body) => seedMessage(subject, body, {}, []),
   bogusId: "INBOX:999999",
   selfAddress: { name: "Agent", address: "agent@example.test" },
+  draftsFolder: "Drafts",
+  sentFolder: "Sent",
 });
