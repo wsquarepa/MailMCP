@@ -20,5 +20,7 @@
 
 Attachment bytes never travel through tool arguments. Each `attachments` entry in `create_draft` and `update_draft` is one of:
 
-- `{ filename, mime_type, upload_id }` — bytes staged beforehand over HTTP: `POST /upload` with the raw file as the request body and the same bearer token, answered with `{ upload_id, size, expires_at }`. Uploads are capped at 3 MB each, expire after 30 minutes, are visible only to the key that staged them, and count toward a 30 MB per-key quota of live staged bytes. Staged uploads are lost on server restart.
-- `{ source_message_id, source_index, filename? }` — copies an attachment from an existing message in the same mailbox (indexes come from `get_message`); requires `read` permission. `filename` overrides the source's name.
+- `{ filename, mime_type, upload_id }` attaches bytes staged beforehand over HTTP: `POST /upload` with the raw file as the request body and the same bearer token, answered with `{ upload_id, size, expires_at }`. Uploads are capped at 3 MB each, expire after 30 minutes, are visible only to the key that staged them, and count toward a 30 MB per-key quota of live staged bytes. Staged uploads are lost on server restart.
+- `{ source_message_id, source_index, filename? }` copies an attachment from an existing message in the same mailbox (indexes come from `get_message`); requires `read` permission. `filename` overrides the source's name.
+
+A single call accepts at most 10 attachment entries, and every outgoing attachment is capped at 3 MB regardless of source.
