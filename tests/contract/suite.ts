@@ -103,6 +103,22 @@ export function runMailBackendContract(descriptor: BackendDescriptor): void {
       expect(fetched.content.toString("utf8")).toBe(`payload of ${marker}`);
     });
 
+    it("replaces the attachment set on update", async () => {
+      const draftId = await backend.createDraft({
+        ...EMPTY, to: [descriptor.selfAddress], subject: `${marker}-att-replace`, body: "attachment v1",
+        attachments: [{ filename: "old.txt", mimeType: "text/plain", content: Buffer.from("old bytes") }],
+      });
+      const updatedId = await backend.updateDraft(draftId, {
+        ...EMPTY,
+        attachments: [{ filename: "new.txt", mimeType: "text/plain", content: Buffer.from("new bytes") }],
+      });
+      const updated = await backend.getMessage(updatedId);
+      expect(updated.attachments).toHaveLength(1);
+      expect(updated.attachments[0]?.filename).toBe("new.txt");
+      const fetched = await backend.getAttachment(updatedId, 0, 10 * 1024 * 1024);
+      expect(fetched.content.toString("utf8")).toBe("new bytes");
+    });
+
     it("rejects trash as a move target and deletes to trash instead", async () => {
       const id = await idOf(marker, null);
       const rejected = await backend.move([id], "trash");
