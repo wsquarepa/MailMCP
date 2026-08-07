@@ -57,7 +57,7 @@ export interface AttachmentContent {
 export interface DraftAttachment {
   filename: string;
   mimeType: string;
-  contentBase64: string;
+  content: Buffer;
 }
 
 // null fields mean "not provided": createDraft treats them as empty,

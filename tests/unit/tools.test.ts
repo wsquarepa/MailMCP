@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import type { Config } from "../../src/config.js";
 import { registerTools } from "../../src/tools/index.js";
 import type { ToolContext } from "../../src/tools/registry.js";
+import { UPLOAD_MAX_BYTES, UploadStore } from "../../src/uploads.js";
 import type {
   Address, AttachmentContent, BulkResult, DraftInput, Folder, ListOptions,
   MailBackend, MessageFull, MessageSummary, SearchOptions, SendResult,
@@ -67,21 +68,28 @@ const CONFIG: Config = {
     { name: "full", token: "tok-full-0123456789", default_mailbox: "hermes",
       grants: { hermes: ["read", "draft", "send", "organize", "delete"] } },
     { name: "limited", token: "tok-lim-0123456789", default_mailbox: "shared" },
+    { name: "drafter", token: "tok-drf-0123456789", default_mailbox: "hermes",
+      grants: { hermes: ["draft"] } },
   ],
 };
 
-async function connect(keyIndex: number, backend: FakeBackend): Promise<Client> {
+async function connect(
+  keyIndex: number,
+  backend: FakeBackend,
+): Promise<{ client: Client; uploads: UploadStore }> {
+  const uploads = new UploadStore();
   const context: ToolContext = {
     config: CONFIG,
     key: CONFIG.keys[keyIndex]!,
     backends: new Map<string, MailBackend>([["hermes", backend], ["shared", backend]]),
+    uploads,
   };
   const server = new McpServer({ name: "mailmcp-test", version: "0.0.0" });
   registerTools(server, context);
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: "test-client", version: "0.0.0" });
   await Promise.all([client.connect(clientTransport), server.connect(serverTransport)]);
-  return client;
+  return { client, uploads };
 }
 
 function textOf(result: Awaited<ReturnType<Client["callTool"]>>): string {
@@ -91,7 +99,7 @@ function textOf(result: Awaited<ReturnType<Client["callTool"]>>): string {
 
 describe("tool layer", () => {
   it("registers all 13 tools", async () => {
-    const client = await connect(0, new FakeBackend());
+    const { client } = await connect(0, new FakeBackend());
     const tools = await client.listTools();
     expect(tools.tools.map((t) => t.name).sort()).toEqual([
       "create_draft", "delete_message", "get_attachment", "get_message",
@@ -102,14 +110,14 @@ describe("tool layer", () => {
 
   it("list_messages defaults to unread, limit 20, offset 0, default mailbox", async () => {
     const backend = new FakeBackend();
-    const client = await connect(0, backend);
+    const { client } = await connect(0, backend);
     const result = await client.callTool({ name: "list_messages", arguments: {} });
     expect(backend.calls).toContain("listMessages:false:20:0");
     expect(textOf(result)).toContain("[hermes INBOX:1]");
   });
 
   it("denies without permission, naming the gap", async () => {
-    const client = await connect(1, new FakeBackend());
+    const { client } = await connect(1, new FakeBackend());
     const result = await client.callTool({
       name: "send_draft", arguments: { draft_id: "Drafts:9", mailbox: "shared" },
     });
@@ -120,21 +128,21 @@ describe("tool layer", () => {
   });
 
   it("rejects an unknown mailbox with the valid list", async () => {
-    const client = await connect(0, new FakeBackend());
+    const { client } = await connect(0, new FakeBackend());
     const result = await client.callTool({ name: "list_messages", arguments: { mailbox: "ghost" } });
     expect(result.isError).toBe(true);
     expect(textOf(result)).toContain("hermes");
   });
 
   it("list_accounts shows grants and default", async () => {
-    const client = await connect(1, new FakeBackend());
+    const { client } = await connect(1, new FakeBackend());
     const text = textOf(await client.callTool({ name: "list_accounts", arguments: {} }));
     expect(text).toContain("shared [default]");
     expect(text).toContain("permissions: read");
   });
 
   it("create_draft enforces exactly one mode", async () => {
-    const client = await connect(0, new FakeBackend());
+    const { client } = await connect(0, new FakeBackend());
     const both = await client.callTool({
       name: "create_draft",
       arguments: { reply_to_message_id: "INBOX:1", to: ["x@x.test"], subject: "s", body: "b" },
@@ -152,7 +160,7 @@ describe("tool layer", () => {
 
   it("parses recipient strings into Address objects and rejects malformed ones", async () => {
     const backend = new FakeBackend();
-    const client = await connect(0, backend);
+    const { client } = await connect(0, backend);
     const ok = await client.callTool({
       name: "create_draft",
       arguments: { to: ["Hermes Agent <h@f.test>"], subject: "s", body: "b" },
@@ -166,23 +174,98 @@ describe("tool layer", () => {
     expect(textOf(bad)).toContain("not-an-address");
   });
 
-  it("rejects malformed base64 attachments before the backend sees them", async () => {
+  it("resolves upload_id attachments to staged bytes", async () => {
     const backend = new FakeBackend();
-    const client = await connect(0, backend);
+    const { client, uploads } = await connect(0, backend);
+    const receipt = uploads.put("full", Buffer.from("staged bytes"), Date.now());
     const result = await client.callTool({
       name: "create_draft",
       arguments: {
         to: ["x@x.test"], subject: "s", body: "b",
-        attachments: [{ filename: "f", mime_type: "text/plain", content_base64: "!!!not-base64!!!" }],
+        attachments: [{ filename: "f.bin", mime_type: "application/octet-stream", upload_id: receipt.uploadId }],
+      },
+    });
+    expect(result.isError).toBeFalsy();
+    expect(backend.lastDraft?.attachments).toEqual([
+      { filename: "f.bin", mimeType: "application/octet-stream", content: Buffer.from("staged bytes") },
+    ]);
+  });
+
+  it("rejects unknown and foreign upload ids with re-upload guidance", async () => {
+    const backend = new FakeBackend();
+    const { client, uploads } = await connect(0, backend);
+    const foreign = uploads.put("limited", Buffer.from("x"), Date.now());
+    for (const uploadId of ["00000000000000000000000000000000", foreign.uploadId]) {
+      const result = await client.callTool({
+        name: "create_draft",
+        arguments: {
+          to: ["x@x.test"], subject: "s", body: "b",
+          attachments: [{ filename: "f", mime_type: "text/plain", upload_id: uploadId }],
+        },
+      });
+      expect(result.isError).toBe(true);
+      expect(textOf(result)).toContain("unknown or expired");
+    }
+    expect(backend.lastDraft).toBeNull();
+  });
+
+  it("copies source-message attachments through getAttachment under the outgoing cap", async () => {
+    const backend = new FakeBackend();
+    const { client } = await connect(0, backend);
+    const result = await client.callTool({
+      name: "create_draft",
+      arguments: {
+        to: ["x@x.test"], subject: "s", body: "b",
+        attachments: [{ source_message_id: "INBOX:1", source_index: 0 }],
+      },
+    });
+    expect(result.isError).toBeFalsy();
+    expect(backend.calls).toContain(`getAttachment:${UPLOAD_MAX_BYTES}`);
+    expect(backend.lastDraft?.attachments).toEqual([
+      { filename: "a.txt", mimeType: "text/plain", content: Buffer.from("hi") },
+    ]);
+  });
+
+  it("requires read permission for source-message attachments", async () => {
+    const backend = new FakeBackend();
+    const { client } = await connect(2, backend);
+    const result = await client.callTool({
+      name: "create_draft",
+      arguments: {
+        to: ["x@x.test"], subject: "s", body: "b",
+        attachments: [{ source_message_id: "INBOX:1", source_index: 0 }],
       },
     });
     expect(result.isError).toBe(true);
+    expect(textOf(result)).toContain("'read'");
+    expect(backend.lastDraft).toBeNull();
+  });
+
+  it("rejects attachment entries that mix or match neither reference shape", async () => {
+    const backend = new FakeBackend();
+    const { client, uploads } = await connect(0, backend);
+    const receipt = uploads.put("full", Buffer.from("x"), Date.now());
+    const entries = [
+      { filename: "f", mime_type: "t/p", upload_id: receipt.uploadId, source_message_id: "INBOX:1", source_index: 0 },
+      { filename: "f" },
+      { upload_id: receipt.uploadId },
+      { source_message_id: "INBOX:1" },
+      { source_message_id: "INBOX:1", source_index: 0, mime_type: "t/p" },
+    ];
+    for (const entry of entries) {
+      const result = await client.callTool({
+        name: "create_draft",
+        arguments: { to: ["x@x.test"], subject: "s", body: "b", attachments: [entry] },
+      });
+      expect(result.isError).toBe(true);
+      expect(textOf(result)).toContain("attachments entry");
+    }
     expect(backend.lastDraft).toBeNull();
   });
 
   it("get_attachment passes the 10 MB cap and returns text for text types", async () => {
     const backend = new FakeBackend();
-    const client = await connect(0, backend);
+    const { client } = await connect(0, backend);
     const result = await client.callTool({ name: "get_attachment", arguments: { id: "INBOX:1", index: 0 } });
     expect(backend.calls).toContain(`getAttachment:${10 * 1024 * 1024}`);
     expect(textOf(result)).toContain("hi");
@@ -190,7 +273,7 @@ describe("tool layer", () => {
 
   it("send_draft confirms recipients and surfaces warnings", async () => {
     const backend = new FakeBackend();
-    const client = await connect(0, backend);
+    const { client } = await connect(0, backend);
     const clean = textOf(await client.callTool({ name: "send_draft", arguments: { draft_id: "Drafts:9" } }));
     expect(clean).toBe("Sent draft Drafts:9 to: R <r@x.test>");
     backend.sendWarning = "Draft Drafts:9 WAS sent successfully. Do NOT send it again.";
@@ -199,7 +282,7 @@ describe("tool layer", () => {
   });
 
   it("move_message reports changed ids through formatBulk", async () => {
-    const client = await connect(0, new FakeBackend());
+    const { client } = await connect(0, new FakeBackend());
     const text = textOf(await client.callTool({
       name: "move_message", arguments: { ids: ["INBOX:1"], target: "junk" },
     }));

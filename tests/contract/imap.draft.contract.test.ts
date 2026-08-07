@@ -46,7 +46,7 @@ describe("ImapSmtpBackend drafts (requires GreenMail)", () => {
       bcc: [HIDDEN],
       subject: marker,
       body: bigBody,
-      attachments: [{ filename: "keep.txt", mimeType: "text/plain", contentBase64: Buffer.from("keep me").toString("base64") }],
+      attachments: [{ filename: "keep.txt", mimeType: "text/plain", content: Buffer.from("keep me") }],
     });
     expect(draftId).toMatch(/^Drafts:\d+$/);
 

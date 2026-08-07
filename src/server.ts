@@ -91,7 +91,7 @@ async function handleMcp(
       return;
     }
   }
-  const context: ToolContext = { config: options.config, key, backends: options.backends };
+  const context: ToolContext = { config: options.config, key, backends: options.backends, uploads: options.uploads };
   const mcpServer = new McpServer({ name: "mailmcp", version });
   registerTools(mcpServer, context);
   // Stateless mode: one server+transport pair per request; mailbox state

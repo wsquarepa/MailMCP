@@ -4,6 +4,7 @@ import { GraphBackend } from "../graph/backend.js";
 import { GraphTokenProvider } from "../graph/tokens.js";
 import { ImapSmtpBackend } from "../imap/backend.js";
 import type { MailBackend } from "../types.js";
+import type { UploadStore } from "../uploads.js";
 
 export const GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0";
 
@@ -11,6 +12,7 @@ export interface ToolContext {
   config: Config;
   key: KeyConfig;
   backends: Map<string, MailBackend>;
+  uploads: UploadStore;
 }
 
 export function buildBackends(config: Config, graphCacheDir: string): Map<string, MailBackend> {

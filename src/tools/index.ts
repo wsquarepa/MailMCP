@@ -10,11 +10,11 @@ import { ATTACHMENT_MAX_BYTES } from "../mail/clean.js";
 import {
   formatAccounts, formatBulk, formatFolders, formatListing, formatMessage,
 } from "../mail/format.js";
-import type { Address, DraftAttachment, DraftInput } from "../types.js";
+import type { Address, DraftAttachment, DraftInput, MailBackend } from "../types.js";
+import { UPLOAD_MAX_BYTES } from "../uploads.js";
 import { resolveMailbox, type ToolContext } from "./registry.js";
 
 const TEXT_MIME_PREFIXES = ["text/", "application/json", "application/xml"];
-const CANONICAL_BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
 
 function text(value: string): CallToolResult {
   return { content: [{ type: "text", text: value }] };
@@ -62,19 +62,6 @@ function parseRecipients(field: string, raw: string[] | undefined): Address[] | 
   });
 }
 
-function parseAttachments(
-  raw: { filename: string; mime_type: string; content_base64: string }[] | undefined,
-): DraftAttachment[] | null {
-  if (raw === undefined) return null;
-  return raw.map((a) => {
-    const stripped = a.content_base64.replace(/\s/g, "");
-    if (stripped.length % 4 !== 0 || !CANONICAL_BASE64.test(stripped)) {
-      throw new InvalidInputError(`attachment '${a.filename}': content_base64 is not valid base64`);
-    }
-    return { filename: a.filename, mimeType: a.mime_type, contentBase64: stripped };
-  });
-}
-
 const draftFields = {
   to: z.array(z.string()).optional(),
   cc: z.array(z.string()).optional(),
@@ -82,17 +69,72 @@ const draftFields = {
   subject: z.string().optional(),
   body: z.string().optional(),
   attachments: z.array(z.object({
-    filename: z.string(), mime_type: z.string(), content_base64: z.string(),
+    filename: z.string().optional(),
+    mime_type: z.string().optional(),
+    upload_id: z.string().optional(),
+    source_message_id: z.string().optional(),
+    source_index: z.number().int().min(0).optional(),
   })).optional(),
 };
+
+interface AttachmentArg {
+  filename?: string | undefined;
+  mime_type?: string | undefined;
+  upload_id?: string | undefined;
+  source_message_id?: string | undefined;
+  source_index?: number | undefined;
+}
 
 interface DraftArgs {
   reply_to_message_id?: string | undefined; to?: string[] | undefined; cc?: string[] | undefined; bcc?: string[] | undefined;
   subject?: string | undefined; body?: string | undefined;
-  attachments?: { filename: string; mime_type: string; content_base64: string }[] | undefined;
+  attachments?: AttachmentArg[] | undefined;
 }
 
-function toDraftInput(args: DraftArgs): DraftInput {
+const ATTACHMENT_SHAPES =
+  "each attachments entry is either { filename, mime_type, upload_id } for bytes staged via POST /upload, " +
+  "or { source_message_id, source_index, filename? } to copy an attachment from an existing message";
+
+async function resolveAttachments(
+  raw: AttachmentArg[] | undefined,
+  context: ToolContext,
+  mailbox: string,
+  backend: MailBackend,
+): Promise<DraftAttachment[] | null> {
+  if (raw === undefined) return null;
+  const resolved: DraftAttachment[] = [];
+  for (const entry of raw) {
+    if (entry.upload_id !== undefined && entry.source_message_id === undefined) {
+      if (entry.filename === undefined || entry.mime_type === undefined || entry.source_index !== undefined) {
+        throw new InvalidInputError(ATTACHMENT_SHAPES);
+      }
+      const bytes = context.uploads.get(context.key.name, entry.upload_id, Date.now());
+      if (bytes === null) {
+        throw new InvalidInputError(
+          `attachment '${entry.filename}': upload_id '${entry.upload_id}' is unknown or expired; ` +
+          "POST the bytes to /upload again and use the returned upload_id",
+        );
+      }
+      resolved.push({ filename: entry.filename, mimeType: entry.mime_type, content: bytes });
+    } else if (entry.source_message_id !== undefined && entry.upload_id === undefined) {
+      if (entry.source_index === undefined || entry.mime_type !== undefined) {
+        throw new InvalidInputError(ATTACHMENT_SHAPES);
+      }
+      requirePermission(context.config, context.key, mailbox, "read");
+      const source = await backend.getAttachment(entry.source_message_id, entry.source_index, UPLOAD_MAX_BYTES);
+      resolved.push({
+        filename: entry.filename ?? source.filename,
+        mimeType: source.mimeType,
+        content: source.content,
+      });
+    } else {
+      throw new InvalidInputError(ATTACHMENT_SHAPES);
+    }
+  }
+  return resolved;
+}
+
+function toDraftInput(args: DraftArgs, attachments: DraftAttachment[] | null): DraftInput {
   return {
     replyToMessageId: args.reply_to_message_id ?? null,
     to: parseRecipients("to", args.to),
@@ -100,7 +142,7 @@ function toDraftInput(args: DraftArgs): DraftInput {
     bcc: parseRecipients("bcc", args.bcc),
     subject: args.subject ?? null,
     body: args.body ?? null,
-    attachments: parseAttachments(args.attachments),
+    attachments,
   };
 }
 
@@ -238,29 +280,31 @@ export function registerTools(server: McpServer, context: ToolContext): void {
   }));
 
   server.registerTool("create_draft", {
-    description: "Create a draft: either a reply (reply_to_message_id + body; threading and recipients handled server-side) or a fresh message (to + subject + body). Nothing is sent until send_draft.",
+    description: "Create a draft: either a reply (reply_to_message_id + body; threading and recipients handled server-side) or a fresh message (to + subject + body). Nothing is sent until send_draft. Attachments are references, never inline bytes: stage a file with POST /upload (raw body, same bearer token, 3 MB cap) and pass { filename, mime_type, upload_id }, or copy from an existing message with { source_message_id, source_index }.",
     inputSchema: {
       mailbox: z.string().optional(),
       reply_to_message_id: z.string().optional(),
       ...draftFields,
     },
   }, async (args) => runTool("create_draft", key.name, args.mailbox ?? null, async () => {
-    const { backend } = gate(args.mailbox, "draft");
+    const { name, backend } = gate(args.mailbox, "draft");
     assertCreateMode(args);
-    const id = await backend.createDraft(toDraftInput(args));
+    const attachments = await resolveAttachments(args.attachments, context, name, backend);
+    const id = await backend.createDraft(toDraftInput(args, attachments));
     return text(`Draft created with id ${id}. Review with get_message, revise with update_draft, send with send_draft.`);
   }));
 
   server.registerTool("update_draft", {
-    description: "Update a draft's provided fields; others are preserved. Returns the draft's CURRENT id; always use the returned id afterwards.",
+    description: "Update a draft's provided fields; others are preserved. Providing attachments replaces the draft's whole attachment set, using the same reference shapes as create_draft. Returns the draft's CURRENT id; always use the returned id afterwards.",
     inputSchema: {
       mailbox: z.string().optional(),
       draft_id: z.string(),
       ...draftFields,
     },
   }, async (args) => runTool("update_draft", key.name, args.mailbox ?? null, async () => {
-    const { backend } = gate(args.mailbox, "draft");
-    const id = await backend.updateDraft(args.draft_id, toDraftInput(args));
+    const { name, backend } = gate(args.mailbox, "draft");
+    const attachments = await resolveAttachments(args.attachments, context, name, backend);
+    const id = await backend.updateDraft(args.draft_id, toDraftInput(args, attachments));
     return text(`Draft updated; current id is ${id}. Use this id for further updates or send_draft.`);
   }));
 

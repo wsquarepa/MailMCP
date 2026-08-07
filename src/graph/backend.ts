@@ -58,8 +58,6 @@ function isoSecond(date: Date): string {
 }
 
 export class GraphBackend implements MailBackend {
-  private static readonly SIMPLE_UPLOAD_MAX = 3 * 1024 * 1024;
-
   private readonly idCache = new Map<string, string>();
   private folderIdCache: Map<string, string> | null = null;
 
@@ -368,20 +366,6 @@ export class GraphBackend implements MailBackend {
     return patch;
   }
 
-  // Graph's simple attachment upload caps at ~3 MB; larger needs an upload
-  // session (spec future-work). Checked before ANY mutation so a failed
-  // create/update never half-applies.
-  private assertAttachmentSizes(input: DraftInput): void {
-    for (const attachment of input.attachments ?? []) {
-      const bytes = Math.floor((attachment.contentBase64.length * 3) / 4);
-      if (bytes > GraphBackend.SIMPLE_UPLOAD_MAX) {
-        throw new InvalidInputError(
-          `attachment '${attachment.filename}' is about ${bytes} bytes; graph mailboxes accept at most 3 MB per attachment in v1`,
-        );
-      }
-    }
-  }
-
   private async assertIsDraft(id: string): Promise<string> {
     const nativeId = await this.resolveId(id);
     const probe = await this.request<GraphMessage>(
@@ -399,13 +383,12 @@ export class GraphBackend implements MailBackend {
         "@odata.type": "#microsoft.graph.fileAttachment",
         name: attachment.filename,
         contentType: attachment.mimeType,
-        contentBytes: attachment.contentBase64,
+        contentBytes: attachment.content.toString("base64"),
       }, id);
     }
   }
 
   async createDraft(input: DraftInput): Promise<string> {
-    this.assertAttachmentSizes(input);
     let draft: GraphMessage;
     if (input.replyToMessageId !== null) {
       const originalNative = await this.resolveId(input.replyToMessageId);
@@ -426,7 +409,6 @@ export class GraphBackend implements MailBackend {
   }
 
   async updateDraft(id: string, input: DraftInput): Promise<string> {
-    this.assertAttachmentSizes(input);
     const nativeId = await this.assertIsDraft(id);
     if (input.attachments !== null) {
       const existing = await this.request<{ value: { id: string }[] }>(

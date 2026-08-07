@@ -417,7 +417,7 @@ export class ImapSmtpBackend implements MailBackend {
           ? input.attachments.map((a) => ({
               filename: a.filename,
               contentType: a.mimeType,
-              content: Buffer.from(a.contentBase64, "base64"),
+              content: a.content,
             }))
           : (base?.attachments ?? []).map((a) => ({
               filename: a.filename ?? "attachment",

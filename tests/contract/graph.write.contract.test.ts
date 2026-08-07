@@ -55,15 +55,6 @@ describe("GraphBackend writes (fake Graph)", () => {
     expect(fake.messagesIn("sentitems")).toHaveLength(1);
   });
 
-  it("rejects an oversized outgoing attachment before any mutation", async () => {
-    const big = Buffer.alloc(4 * 1024 * 1024, 1).toString("base64");
-    await expect(backend.createDraft({
-      ...EMPTY, to: [RECIPIENT], subject: "big", body: "b",
-      attachments: [{ filename: "big.bin", mimeType: "application/octet-stream", contentBase64: big }],
-    })).rejects.toThrow("3 MB");
-    expect(fake.messagesIn("drafts").filter((m) => m.subject === "big")).toHaveLength(0);
-  });
-
   it("creates a reply draft via createReply with Re: subject and sender recipient", async () => {
     const replyId = await backend.createDraft({ ...EMPTY, replyToMessageId: inboxShortId, body: "my reply" });
     const reply = await backend.getMessage(replyId);
