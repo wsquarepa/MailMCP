@@ -214,6 +214,20 @@ export class FakeGraph {
           },
         };
       }
+      const attachmentGet = sub.match(/^\/attachments\/([^/]+)$/);
+      if (method === "GET" && attachmentGet !== null) {
+        const attachment = message.attachments.find((a) => a.id === decodeURIComponent(attachmentGet[1]!));
+        if (attachment === undefined) return { status: 404, json: { error: { code: "ErrorItemNotFound" } } };
+        return {
+          status: 200,
+          json: {
+            "@odata.type": "#microsoft.graph.fileAttachment",
+            id: attachment.id, name: attachment.name, contentType: attachment.contentType,
+            size: Buffer.from(attachment.contentBytes, "base64").length,
+            contentBytes: attachment.contentBytes,
+          },
+        };
+      }
       return this.handleWrite(method, message, sub, body);
     }
     if (method === "POST" && pathname === "/me/messages") {

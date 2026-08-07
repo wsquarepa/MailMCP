@@ -89,6 +89,20 @@ export function runMailBackendContract(descriptor: BackendDescriptor): void {
       expect(inSent).toHaveLength(1);
     });
 
+    it("round-trips a draft attachment: create, read meta, fetch bytes", async () => {
+      const payload = Buffer.from(`payload of ${marker}`);
+      const draftId = await backend.createDraft({
+        ...EMPTY, to: [descriptor.selfAddress], subject: `${marker}-att`, body: "with attachment",
+        attachments: [{ filename: "note.txt", mimeType: "text/plain", content: payload }],
+      });
+      const draft = await backend.getMessage(draftId);
+      expect(draft.attachments).toHaveLength(1);
+      expect(draft.attachments[0]?.filename).toBe("note.txt");
+      const fetched = await backend.getAttachment(draftId, 0, 10 * 1024 * 1024);
+      expect(fetched.mimeType).toBe("text/plain");
+      expect(fetched.content.toString("utf8")).toBe(`payload of ${marker}`);
+    });
+
     it("rejects trash as a move target and deletes to trash instead", async () => {
       const id = await idOf(marker, null);
       const rejected = await backend.move([id], "trash");
