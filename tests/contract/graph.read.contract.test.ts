@@ -110,6 +110,19 @@ describe("GraphBackend reads (fake Graph)", () => {
     await expect(backend.getMessage(bogus)).rejects.toThrow(NotFoundError);
   });
 
+  it("search with a from filter skips messages whose sender address is null", async () => {
+    fake.seed({
+      folder: "inbox", subject: "system-notice", fromName: "Postmaster", fromAddress: null,
+      body: "postmaster delivery notice", isRead: true,
+      receivedAt: new Date("2026-08-06T15:00:00Z"), headers: {},
+    });
+    const hits = await backend.search({
+      folder: null, query: "postmaster", from: "s@x.test", subject: null,
+      since: null, before: null, unreadOnly: false, limit: 10,
+    });
+    expect(hits).toHaveLength(0);
+  });
+
   it("searches with free text and client-side criteria in one folder", async () => {
     const hits = await backend.search({
       folder: null, query: "Graph body", from: "s@x.test", subject: null,

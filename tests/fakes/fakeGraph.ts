@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:http";
 
 export interface FakeMessageInput {
-  folder: string; subject: string; fromName: string; fromAddress: string;
+  // Real Graph emits "address": null for some system-generated mail.
+  folder: string; subject: string; fromName: string; fromAddress: string | null;
   body: string; isRead: boolean; receivedAt: Date; headers: Record<string, string>;
   // Overrides the generated native id; lets callers construct id collisions deterministically.
   id?: string;
@@ -10,7 +11,7 @@ export interface FakeMessageInput {
 }
 
 export interface FakeMessage {
-  id: string; folder: string; subject: string; fromName: string; fromAddress: string;
+  id: string; folder: string; subject: string; fromName: string; fromAddress: string | null;
   toRecipients: { name: string; address: string }[];
   ccRecipients: { name: string; address: string }[];
   bccRecipients: { name: string; address: string }[];
@@ -49,7 +50,7 @@ function fullJson(m: FakeMessage): Record<string, unknown> {
     // Real Graph always returns baseline internet message headers; seeded
     // custom headers are appended to them.
     internetMessageHeaders: [
-      { name: "From", value: `${m.fromName} <${m.fromAddress}>` },
+      { name: "From", value: `${m.fromName} <${m.fromAddress ?? ""}>` },
       { name: "Subject", value: m.subject },
       { name: "Message-ID", value: `<${m.id}@fake.graph>` },
       { name: "Date", value: new Date(m.receivedAtMs ?? m.createdAtMs).toUTCString() },
@@ -320,7 +321,7 @@ export class FakeGraph {
         id,
         folder: "drafts",
         subject: message.subject.startsWith("Re:") ? message.subject : `Re: ${message.subject}`,
-        toRecipients: [{ name: message.fromName, address: message.fromAddress }],
+        toRecipients: [{ name: message.fromName, address: message.fromAddress ?? "" }],
         ccRecipients: [], bccRecipients: [],
         isDraft: true, isRead: true, receivedAtMs: null,
         createdAtMs: message.createdAtMs + 60_000,

@@ -13,7 +13,8 @@ import { decodeShortId, encodeShortId, matchesShortId } from "./shortid.js";
 
 export type GraphMailboxConfig = Extract<MailboxConfig, { backend: "graph" }>;
 
-interface GraphRecipient { emailAddress: { name?: string; address: string } }
+// Graph returns "address": null for some system-generated senders.
+interface GraphRecipient { emailAddress: { name?: string; address?: string | null } }
 interface GraphMessage {
   id: string;
   subject?: string;
@@ -49,7 +50,9 @@ const EPOCH_GUARD = { receivedDateTime: "receivedDateTime ge 1970-01-01T00:00:00
 
 function toAddress(recipient: GraphRecipient | undefined): Address | null {
   if (recipient === undefined) return null;
-  return { name: recipient.emailAddress.name ?? "", address: recipient.emailAddress.address };
+  const { name, address } = recipient.emailAddress;
+  if (address === undefined || address === null) return null;
+  return { name: name ?? "", address };
 }
 
 function isoSecond(date: Date): string {
@@ -250,7 +253,7 @@ export class GraphBackend implements MailBackend {
       messages = (await this.request<GraphPage>("GET", `${path}/messages?${query}`, null, null)).value;
       messages = messages.filter((m) => {
         const received = this.timestampOf(m);
-        if (options.from !== null && m.from?.emailAddress.address.toLowerCase() !== options.from.toLowerCase()) return false;
+        if (options.from !== null && toAddress(m.from)?.address.toLowerCase() !== options.from.toLowerCase()) return false;
         if (options.subject !== null && !(m.subject ?? "").toLowerCase().includes(options.subject.toLowerCase())) return false;
         if (options.since !== null && received < options.since) return false;
         if (options.before !== null && received >= options.before) return false;
@@ -267,7 +270,7 @@ export class GraphBackend implements MailBackend {
         `&$orderby=${encodeURIComponent(`${timeField} desc`)}&$top=${options.limit * 4}`;
       messages = (await this.request<GraphPage>("GET", `${path}/messages?${query}`, null, null)).value;
       messages = messages.filter((m) => {
-        if (options.from !== null && m.from?.emailAddress.address.toLowerCase() !== options.from.toLowerCase()) return false;
+        if (options.from !== null && toAddress(m.from)?.address.toLowerCase() !== options.from.toLowerCase()) return false;
         if (options.subject !== null && !(m.subject ?? "").toLowerCase().includes(options.subject.toLowerCase())) return false;
         return true;
       });
@@ -299,8 +302,8 @@ export class GraphBackend implements MailBackend {
       replyTo: toAddress(message.replyTo?.[0]),
       returnPath: (message.internetMessageHeaders ?? [])
         .find((h) => h.name.toLowerCase() === "return-path")?.value ?? null,
-      to: (message.toRecipients ?? []).map((r) => toAddress(r)!),
-      cc: (message.ccRecipients ?? []).map((r) => toAddress(r)!),
+      to: (message.toRecipients ?? []).map((r) => toAddress(r)).filter((a): a is Address => a !== null),
+      cc: (message.ccRecipients ?? []).map((r) => toAddress(r)).filter((a): a is Address => a !== null),
       auth: parseAuthResults(rawHeaders),
       bodyMarkdown,
       bodyRaw: rawBody,
@@ -440,7 +443,7 @@ export class GraphBackend implements MailBackend {
     );
     const recipients = [
       ...(draft.toRecipients ?? []), ...(draft.ccRecipients ?? []), ...(draft.bccRecipients ?? []),
-    ].map((r) => toAddress(r)!).filter((a) => a.address !== "");
+    ].map((r) => toAddress(r)).filter((a): a is Address => a !== null && a.address !== "");
     if (recipients.length === 0) {
       throw new InvalidInputError(`draft ${id} has no recipients; update_draft it with a 'to' first`);
     }
