@@ -1,6 +1,8 @@
+import { readFileSync } from "node:fs";
+import { simpleParser } from "mailparser";
 import { describe, expect, it } from "vitest";
 import {
-  htmlToPlainText, makeSnippet, stripQuotedAndSignature, truncateBody,
+  htmlToMarkdown, htmlToPlainText, makeSnippet, stripQuotedAndSignature, truncateBody,
 } from "../../src/mail/clean.js";
 
 describe("htmlToPlainText", () => {
@@ -51,5 +53,55 @@ describe("truncateBody", () => {
   });
   it("passes small bodies through", () => {
     expect(truncateBody("hi", 50_000)).toEqual({ text: "hi", truncated: false });
+  });
+});
+
+describe("htmlToMarkdown", () => {
+  it("preserves links inline with verbatim hrefs", () => {
+    const md = htmlToMarkdown('<p>See <a href="https://x.test/a?id=1&amp;sig=abc">the docs</a></p>');
+    expect(md).toContain("[the docs](https://x.test/a?id=1&sig=abc)");
+  });
+
+  it("renders headings, lists, and GFM tables", () => {
+    const md = htmlToMarkdown(
+      "<h1>Title</h1><ul><li>one</li><li>two</li></ul>" +
+      "<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>",
+    );
+    expect(md).toContain("# Title");
+    expect(md).toContain("-   one");
+    expect(md).toContain("| A | B |");
+    expect(md).toContain("| 1 | 2 |");
+  });
+
+  it("drops images, keeping only alt text", () => {
+    const md = htmlToMarkdown('<p><img src="https://t.test/pixel.gif" alt="Logo"> hello</p>');
+    expect(md).toContain("Logo");
+    expect(md).toContain("hello");
+    expect(md).not.toContain("pixel.gif");
+  });
+
+  it("drops script and style content", () => {
+    const md = htmlToMarkdown("<style>p{color:red}</style><p>Visible</p><script>alert(1)</script>");
+    expect(md).toContain("Visible");
+    expect(md).not.toContain("alert");
+    expect(md).not.toContain("color:red");
+  });
+
+  it("tolerates malformed HTML", () => {
+    expect(htmlToMarkdown("<div><p>Unclosed <b>bold")).toContain("Unclosed **bold**");
+  });
+
+  it("converts a real-world Outlook message cleanly", async () => {
+    const source = readFileSync(new URL("../fixtures/outlook-sample.eml", import.meta.url));
+    const parsed = await simpleParser(source);
+    expect(parsed.html).not.toBe(false);
+    const md = htmlToMarkdown(parsed.html as string);
+    expect(md).toContain("](https://example.test/zoom/j/82999843780?pwd=SamplePwd123)");
+    expect(md).toContain("https://example.test/canvas/pages/final-exam");
+    expect(md).toContain("Hi Agent,");
+    expect(md).not.toContain("data:image");
+    expect(md).not.toContain("iVBOR");
+    expect(md).not.toContain("font-family");
+    expect(md).not.toContain("elementToProof");
   });
 });

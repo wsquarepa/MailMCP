@@ -1,0 +1,118 @@
+Received: from mail.example.test (2001:db8::21) by
+ mx.example.test with HTTPS; Sat, 1 Aug 2026 00:00:00 +0000
+From: "Sender, Sample" <sender@example.test>
+To: "Agent, Test" <agent@example.test>
+Subject: Final Exam Proctoring
+Thread-Topic: Final Exam Proctoring
+Date: Sat, 1 Aug 2026 00:00:00 +0000
+Message-ID: <outlook-sample-fixture@example.test>
+Accept-Language: en-US
+Content-Language: en-US
+Content-Type: multipart/related;
+	boundary="_004_SAMPLEOUTERBOUNDARY_";
+	type="multipart/alternative"
+MIME-Version: 1.0
+
+--_004_SAMPLEOUTERBOUNDARY_
+Content-Type: multipart/alternative;
+	boundary="_000_SAMPLEINNERBOUNDARY_"
+
+--_000_SAMPLEINNERBOUNDARY_
+Content-Type: text/plain; charset="iso-8859-1"
+Content-Transfer-Encoding: quoted-printable
+
+Hi Agent,
+Please see the necessary information for today's exam below:
+Zoom link: (Zoom<https://example.test/zoom/j/82999843780?pwd=3DSamplePwd12=
+3>)
+Canvas link: https://example.test/canvas/pages/final-exam
+Gradescope: https://example.test/gradescope/submissions
+
+Best,
+
+SAMPLE SENDER
+Professor
+Sample University
+sender@example.test<mailto:sender@example.test>
+
+[cid:51b07200-79ff-49ee-afe1-b2bfe51379e2]<https://example.test/>
+
+Any written communication regarding university business may be subject to =
+public disclosure.
+
+--_000_SAMPLEINNERBOUNDARY_
+Content-Type: text/html; charset="iso-8859-1"
+Content-Transfer-Encoding: quoted-printable
+
+<html>
+<head>
+<meta http-equiv=3D"Content-Type" content=3D"text/html; charset=3Diso-8859=
+-1">
+<style type=3D"text/css" style=3D"display:none;"> P {margin-top:0;margin-b=
+ottom:0;} </style>
+</head>
+<body dir=3D"ltr">
+<div class=3D"elementToProof" style=3D"font-family: Aptos, Calibri, sans-s=
+erif; font-size: 12pt; color: rgb(0, 0, 0);">
+Hi Agent,</div>
+<div class=3D"elementToProof" style=3D"font-family: Aptos, Calibri, sans-s=
+erif; font-size: 12pt; color: rgb(0, 0, 0);">
+Please see the necessary information for today's exam below:</div>
+<div class=3D"elementToProof" style=3D"font-family: Aptos, Calibri, sans-s=
+erif; font-size: 12pt; color: rgb(0, 0, 0);">
+Zoom link: <b>(</b><a href=3D"https://example.test/zoom/j/82999843780?pwd=
+=3DSamplePwd123" target=3D"_blank" class=3D"inline_disabled OWAAutoLink" r=
+el=3D"noopener"><b>Zoom</b></a><b>)</b></div>
+<div class=3D"elementToProof" style=3D"font-family: Aptos, Calibri, sans-s=
+erif; font-size: 12pt; color: rgb(0, 0, 0);">
+Canvas link: <a href=3D"https://example.test/canvas/pages/final-exam" clas=
+s=3D"OWAAutoLink">
+https://example.test/canvas/pages/final-exam</a></div>
+<div class=3D"elementToProof" style=3D"font-family: Aptos, Calibri, sans-s=
+erif; font-size: 12pt; color: rgb(0, 0, 0);">
+Gradescope: <a href=3D"https://example.test/gradescope/submissions">
+https://example.test/gradescope/submissions</a></div>
+<div class=3D"elementToProof"><br>
+</div>
+<div class=3D"elementToProof" style=3D"font-size: 12pt;">Best,</div>
+<div id=3D"Signature" class=3D"elementToProof">
+<p class=3D"elementToProof" style=3D"margin: 0in; font-family: Calibri, sa=
+ns-serif; font-size: 11pt;">
+<span style=3D"color: rgb(19, 41, 75);"><b>SAMPLE SENDER</b></span><span s=
+tyle=3D"color: black;"><br>
+</span><span style=3D"color: rgb(19, 41, 75);"><i>Professor</i></span><sp=
+an style=3D"color: black;"><br>
+</span><span style=3D"color: rgb(19, 41, 75);">Sample University</span><sp=
+an style=3D"color: black;"><br>
+</span><span style=3D"color: blue;"><a href=3D"mailto:sender@example.test"=
+ class=3D"OWAAutoLink" style=3D"color: blue;"><u>sender@example.test</u></=
+a></span><span style=3D"color: black;"><br>
+&nbsp;<br>
+</span><span style=3D"color: rgb(0, 0, 0);"><a href=3D"https://example.tes=
+t/" class=3D"OWAAutoLink" style=3D"color: rgb(0, 0, 0);"><u><img width=3D"=
+180" height=3D"34" style=3D"width: 180px; height: 34px;" src=3D"cid:51b072=
+00-79ff-49ee-afe1-b2bfe51379e2"></u></a></span><span style=3D"color: black=
+;"><br>
+<br>
+</span><span style=3D"color: rgb(102, 102, 102);"><i>Any written communica=
+tion regarding university business may be subject to public disclosure.</i=
+></span></p>
+</div>
+</body>
+</html>
+
+--_000_SAMPLEINNERBOUNDARY_--
+
+--_004_SAMPLEOUTERBOUNDARY_
+Content-Type: image/png; name="image.png"
+Content-Description: image.png
+Content-Disposition: inline; filename="image.png"; size=68;
+	creation-date="Sat, 01 Aug 2026 00:00:00 GMT";
+	modification-date="Sat, 01 Aug 2026 00:00:00 GMT"
+Content-ID: <51b07200-79ff-49ee-afe1-b2bfe51379e2>
+Content-Transfer-Encoding: base64
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGA
+hKmMIQAAAABJRU5ErkJggg==
+
+--_004_SAMPLEOUTERBOUNDARY_--

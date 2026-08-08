@@ -1,10 +1,30 @@
 import { convert } from "html-to-text";
+import TurndownService from "turndown";
+import { gfm } from "turndown-plugin-gfm";
 
 export const SNIPPET_MAX_CHARS = 200;
 // Display cap for get_message output only. Draft update/send paths always
 // operate on the raw stored draft, never on text truncated by this cap.
 export const BODY_MAX_CHARS = 50_000;
 export const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
+
+const turndown = new TurndownService({
+  headingStyle: "atx",
+  codeBlockStyle: "fenced",
+  bulletListMarker: "-",
+});
+turndown.use(gfm);
+turndown.remove(["script", "style", "title"]);
+// Email images are overwhelmingly tracking pixels and layout spacers; keep
+// only the alt text so the reader loses nothing meaningful.
+turndown.addRule("imgAltText", {
+  filter: "img",
+  replacement: (_content, node) => (node as HTMLElement).getAttribute("alt") ?? "",
+});
+
+export function htmlToMarkdown(html: string): string {
+  return turndown.turndown(html);
+}
 
 export function htmlToPlainText(html: string): string {
   return convert(html, {
