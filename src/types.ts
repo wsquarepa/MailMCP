@@ -43,6 +43,10 @@ export interface MessageFull extends MessageSummary {
   auth: AuthResults;
   bodyText: string;
   bodyTruncated: boolean;
+  // Markdown-converted display body (trimmed, untruncated; windowing is the
+  // tool layer's job) and the unconverted stored body (verbatim).
+  bodyMarkdown: string;
+  bodyRaw: string;
   attachments: AttachmentMeta[];
   rawHeaders: string;
 }

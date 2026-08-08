@@ -6,6 +6,10 @@ export interface BackendDescriptor {
   name: string;
   makeBackend: () => Promise<{ backend: MailBackend; cleanup: () => Promise<void> }>;
   seed: (subject: string, body: string) => Promise<void>;
+  // Seeds a message whose HTML body is `html`; on backends with
+  // multipart/alternative support the message also carries a text/plain
+  // alternative reading exactly "plain alternative".
+  seedHtml: (subject: string, html: string) => Promise<void>;
   bogusId: string;
   selfAddress: Address;
   draftsFolder: string;
@@ -17,6 +21,10 @@ const EMPTY = {
   subject: null, body: null, attachments: null,
 };
 
+const HTML_FIXTURE =
+  '<h1>Heading</h1><p>See <a href="https://example.test/deep/link?id=42">the docs</a></p>' +
+  '<img src="https://example.test/pixel.gif" alt="">';
+
 export function runMailBackendContract(descriptor: BackendDescriptor): void {
   describe(`MailBackend contract: ${descriptor.name}`, () => {
     let backend: MailBackend;
@@ -26,6 +34,7 @@ export function runMailBackendContract(descriptor: BackendDescriptor): void {
     beforeAll(async () => {
       ({ backend, cleanup } = await descriptor.makeBackend());
       await descriptor.seed(marker, `body of ${marker}`);
+      await descriptor.seedHtml(`${marker}-html`, HTML_FIXTURE);
     });
     afterAll(async () => await cleanup());
 
@@ -35,7 +44,9 @@ export function runMailBackendContract(descriptor: BackendDescriptor): void {
         since: null, before: null, unreadOnly: false, limit: 5,
       });
       expect(found.length).toBeGreaterThan(0);
-      return found[0]!.id;
+      const exact = found.find((m) => m.subject === subject);
+      expect(exact).toBeDefined();
+      return exact!.id;
     }
 
     it("lists the seeded message as unread by default, with snippet", async () => {
@@ -51,6 +62,21 @@ export function runMailBackendContract(descriptor: BackendDescriptor): void {
       expect(full.subject).toBe(marker);
       expect(full.bodyText).toContain("body of");
       expect(full.rawHeaders.length).toBeGreaterThan(0);
+    });
+
+    it("converts an HTML body to markdown from the HTML part and keeps the raw HTML", async () => {
+      const full = await backend.getMessage(await idOf(`${marker}-html`, null));
+      expect(full.bodyMarkdown).toContain("# Heading");
+      expect(full.bodyMarkdown).toContain("[the docs](https://example.test/deep/link?id=42)");
+      expect(full.bodyMarkdown).not.toContain("pixel.gif");
+      expect(full.bodyMarkdown).not.toContain("plain alternative");
+      expect(full.bodyRaw).toContain('<a href="https://example.test/deep/link?id=42">');
+    });
+
+    it("returns plain-text-only mail identically in markdown and raw", async () => {
+      const full = await backend.getMessage(await idOf(marker, null));
+      expect(full.bodyMarkdown).toContain(`body of ${marker}`);
+      expect(full.bodyRaw).toContain(`body of ${marker}`);
     });
 
     it("raises the stale-id error shape for unknown ids", async () => {

@@ -11,7 +11,7 @@ import {
 import { logger } from "../logger.js";
 import { parseAuthResults } from "../mail/authresults.js";
 import {
-  BODY_MAX_CHARS, SNIPPET_MAX_CHARS, htmlToPlainText, makeSnippet,
+  BODY_MAX_CHARS, SNIPPET_MAX_CHARS, htmlToMarkdown, htmlToPlainText, makeSnippet,
   stripQuotedAndSignature, truncateBody,
 } from "../mail/clean.js";
 import type {
@@ -302,8 +302,10 @@ export class ImapSmtpBackend implements MailBackend {
     const { folder, uid, source, flags } = await this.fetchRaw(id);
     const parsed = await simpleParser(source);
     const rawHeaders = parsed.headerLines.map((h) => h.line).join("\r\n");
-    const text = parsed.text ?? (parsed.html !== false ? htmlToPlainText(parsed.html) : "");
-    const { text: bodyText, truncated } = truncateBody(text.trim(), BODY_MAX_CHARS);
+    const plainText = parsed.text ?? (parsed.html !== false ? htmlToPlainText(parsed.html) : "");
+    const { text: bodyText, truncated } = truncateBody(plainText.trim(), BODY_MAX_CHARS);
+    const bodyMarkdown = parsed.html !== false ? htmlToMarkdown(parsed.html).trim() : (parsed.text ?? "").trim();
+    const bodyRaw = parsed.html !== false ? parsed.html : parsed.text ?? "";
     const structure = await this.bodyStructureOf(folder, uid);
     const attachments: AttachmentMeta[] = attachmentParts(structure).map((p, index) => ({
       index,
@@ -319,7 +321,7 @@ export class ImapSmtpBackend implements MailBackend {
       date: parsed.date ?? null,
       unread: !flags.has("\\Seen"),
       hasAttachments: attachments.length > 0,
-      snippet: makeSnippet(stripQuotedAndSignature(text), SNIPPET_MAX_CHARS),
+      snippet: makeSnippet(stripQuotedAndSignature(plainText), SNIPPET_MAX_CHARS),
       surfacedHeaders: this.surfacedFromHeaders(rawHeaders),
       replyTo: toAddress(parsed.replyTo)[0] ?? null,
       returnPath: parsed.headers.get("return-path")?.toString() ?? null,
@@ -328,6 +330,8 @@ export class ImapSmtpBackend implements MailBackend {
       auth: parseAuthResults(rawHeaders),
       bodyText,
       bodyTruncated: truncated,
+      bodyMarkdown,
+      bodyRaw,
       attachments,
       rawHeaders,
     };

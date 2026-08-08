@@ -6,6 +6,7 @@ export interface FakeMessageInput {
   body: string; isRead: boolean; receivedAt: Date; headers: Record<string, string>;
   // Overrides the generated native id; lets callers construct id collisions deterministically.
   id?: string;
+  bodyType?: "text" | "html";
 }
 
 export interface FakeMessage {
@@ -82,7 +83,7 @@ export class FakeGraph {
       fromName: input.fromName, fromAddress: input.fromAddress,
       toRecipients: [{ name: "Agent", address: "school@school.test" }],
       ccRecipients: [], bccRecipients: [],
-      body: input.body, bodyType: "text", isRead: input.isRead, isDraft: input.folder === "drafts",
+      body: input.body, bodyType: input.bodyType ?? "text", isRead: input.isRead, isDraft: input.folder === "drafts",
       receivedAtMs: input.folder === "drafts" ? null : input.receivedAt.getTime(),
       createdAtMs: input.receivedAt.getTime(),
       headers: input.headers, attachments: [],

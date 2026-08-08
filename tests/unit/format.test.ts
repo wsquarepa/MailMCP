@@ -36,6 +36,8 @@ describe("formatMessage", () => {
     auth: { spf: "pass", dkim: "pass", dkimDomain: "github.test", dmarc: "pass" },
     bodyText: "Full body here.",
     bodyTruncated: false,
+    bodyMarkdown: "Full body here.",
+    bodyRaw: "<p>Full body here.</p>",
     attachments: [],
     rawHeaders: "Received: from x\r\nFrom: GitHub <notifications@github.test>",
   };

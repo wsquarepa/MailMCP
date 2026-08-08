@@ -29,3 +29,14 @@ export async function seedMessage(
     attachments: attachments.map((a) => ({ filename: a.filename, content: a.content })),
   });
 }
+
+export async function seedHtmlMessage(subject: string, html: string): Promise<void> {
+  const transport = createTransport({ host: "localhost", port: 3025, secure: false });
+  await transport.sendMail({
+    from: "Sender <sender@example.test>",
+    to: "agent@example.test",
+    subject,
+    text: "plain alternative",
+    html,
+  });
+}

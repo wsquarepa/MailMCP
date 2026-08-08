@@ -2,7 +2,7 @@ import type { MailboxConfig } from "../config.js";
 import { AmbiguousIdError, InvalidInputError, NotFoundError, ToolError } from "../errors.js";
 import { parseAuthResults } from "../mail/authresults.js";
 import {
-  BODY_MAX_CHARS, SNIPPET_MAX_CHARS, htmlToPlainText, makeSnippet,
+  BODY_MAX_CHARS, SNIPPET_MAX_CHARS, htmlToMarkdown, htmlToPlainText, makeSnippet,
   stripQuotedAndSignature, truncateBody,
 } from "../mail/clean.js";
 import type {
@@ -292,8 +292,10 @@ export class GraphBackend implements MailBackend {
     const { nativeId, message } = await this.fetchFull(id);
     const summary = this.toSummary(message);
     const rawBody = message.body?.content ?? "";
-    const text = message.body?.contentType === "html" ? htmlToPlainText(rawBody) : rawBody;
+    const isHtml = message.body?.contentType === "html";
+    const text = isHtml ? htmlToPlainText(rawBody) : rawBody;
     const { text: bodyText, truncated } = truncateBody(text.trim(), BODY_MAX_CHARS);
+    const bodyMarkdown = isHtml ? htmlToMarkdown(rawBody).trim() : rawBody.trim();
     const rawHeaders = this.rawHeadersOf(message);
     return {
       ...summary,
@@ -305,6 +307,8 @@ export class GraphBackend implements MailBackend {
       auth: parseAuthResults(rawHeaders),
       bodyText,
       bodyTruncated: truncated,
+      bodyMarkdown,
+      bodyRaw: rawBody,
       attachments: await this.attachmentMeta(nativeId, id),
       rawHeaders,
     };

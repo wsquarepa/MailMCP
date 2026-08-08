@@ -23,6 +23,14 @@ runMailBackendContract({
       body, isRead: false, receivedAt: new Date(1_754_800_000_000 + counter * 5000), headers: {},
     });
   },
+  seedHtml: async (subject, html) => {
+    counter += 1;
+    fake.seed({
+      folder: "inbox", subject, fromName: "Seeder", fromAddress: "seed@x.test",
+      body: html, bodyType: "html", isRead: false,
+      receivedAt: new Date(1_754_800_000_000 + counter * 5000), headers: {},
+    });
+  },
   bogusId: encodeShortId("no-such-native-id", new Date(1_700_000_000_000)),
   selfAddress: { name: "Agent", address: "school@school.test" },
   draftsFolder: "drafts",

@@ -32,7 +32,8 @@ class FakeBackend implements MailBackend {
     return {
       ...SUMMARY, replyTo: null, returnPath: null, to: [], cc: [],
       auth: { spf: null, dkim: null, dkimDomain: null, dmarc: null },
-      bodyText: "body", bodyTruncated: false, attachments: [], rawHeaders: "H: v",
+      bodyText: "body", bodyTruncated: false, bodyMarkdown: "body", bodyRaw: "<p>body</p>",
+      attachments: [], rawHeaders: "H: v",
     };
   }
   async getAttachment(_id: string, _index: number, maxBytes: number): Promise<AttachmentContent> {
