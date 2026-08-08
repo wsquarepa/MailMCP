@@ -8,7 +8,7 @@ import { startServer } from "../../src/server.js";
 import { closeBackends } from "../../src/tools/registry.js";
 import type { MailBackend } from "../../src/types.js";
 import { UPLOAD_MAX_BYTES, UploadStore } from "../../src/uploads.js";
-import { imapMailboxConfig, seedMessage } from "../helpers/greenmail.js";
+import { imapMailboxConfig, seedHtmlMessage, seedMessage } from "../helpers/greenmail.js";
 
 const CONFIG: Config = {
   mailboxes: { hermes: imapMailboxConfig() },
@@ -165,11 +165,38 @@ describe("server e2e (requires GreenMail)", () => {
     expect(((await over.json()) as { error: string }).error).toContain("quota");
   });
 
+  it("serves markdown bodies, raw HTML on request, and pages with body_offset", async () => {
+    const htmlSubject = `${subject}-html`;
+    await seedHtmlMessage(
+      htmlSubject,
+      `<p>Docs at <a href="https://example.test/guide?id=7">the guide</a></p><p>${"z".repeat(31_000)}</p>`,
+    );
+    const { client, transport } = clientFor(baseUrl, "tok-hermes-0123456789");
+    await client.connect(transport);
+    const found = await client.callTool({ name: "search_messages", arguments: { subject: htmlSubject } });
+    const id = /\[hermes ([^\]]+)\]/.exec(textOf(found))?.[1];
+    expect(id).toBeDefined();
+    const markdown = textOf(await client.callTool({ name: "get_message", arguments: { id } }));
+    expect(markdown).toContain("[the guide](https://example.test/guide?id=7)");
+    expect(markdown).toContain("call get_message again with body_offset=30000");
+    const raw = textOf(await client.callTool({
+      name: "get_message", arguments: { id, raw: true },
+    }));
+    expect(raw).toContain('<a href="https://example.test/guide?id=7">');
+    const page2 = textOf(await client.callTool({
+      name: "get_message", arguments: { id, body_offset: 30_000 },
+    }));
+    expect(page2).toContain("zzz");
+    expect(page2).not.toContain("[the guide]");
+    await client.close();
+  });
+
   it("completes the triage flow: list unread, read, move to junk", async () => {
     const { client, transport } = clientFor(baseUrl, "tok-hermes-0123456789");
     await client.connect(transport);
     const listed = await client.callTool({ name: "list_messages", arguments: { include_read: true, limit: 50 } });
-    const id = textOf(listed).match(new RegExp(`\\[hermes (INBOX:\\d+)\\][^\\n]*\\n[^\\n]*${subject}`))?.[1];
+    const escapedSubject = subject.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const id = textOf(listed).match(new RegExp(`\\[hermes (INBOX:\\d+)\\][^\\n]*\\n[^\\n]*${escapedSubject}(?![-\\w])`))?.[1];
     expect(id).toBeDefined();
     const read = await client.callTool({ name: "get_message", arguments: { id } });
     expect(textOf(read)).toContain("e2e body");

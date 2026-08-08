@@ -6,7 +6,7 @@
 | `list_folders` | List folders and identify special roles such as inbox, junk, trash, archive, drafts, and sent. |
 | `list_messages` | List messages with concise metadata and snippets; defaults to the newest 20 unread inbox messages. |
 | `search_messages` | Search one folder by text, sender, subject, or date range. |
-| `get_message` | Read a cleaned message with its envelope and authentication summary, with optional raw headers. |
+| `get_message` | Read a message with its envelope and authentication summary; the body arrives as markdown with links preserved, `raw` returns the unconverted stored body, and `body_offset` pages bodies past the 30k-character window. Optional raw headers. |
 | `get_attachment` | Fetch one attachment as text or base64, subject to the 10 MB cap. |
 | `create_draft` | Create a fresh or server-threaded reply draft without sending it; attachments are passed by reference. |
 | `update_draft` | Update supplied draft fields while preserving the others, and return the current draft ID; providing attachments replaces the set. |
