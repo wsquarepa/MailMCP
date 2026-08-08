@@ -2,7 +2,7 @@ import type { MailboxConfig } from "../config.js";
 import { AmbiguousIdError, InvalidInputError, NotFoundError, ToolError } from "../errors.js";
 import { parseAuthResults } from "../mail/authresults.js";
 import {
-  SNIPPET_MAX_CHARS, htmlToMarkdown, htmlToPlainText, makeSnippet, stripQuotedAndSignature,
+  SNIPPET_MAX_CHARS, htmlToMarkdown, makeSnippet, stripQuotedAndSignature,
 } from "../mail/clean.js";
 import type {
   Address, AttachmentContent, AttachmentMeta, BulkResult, DraftInput, Folder,
@@ -292,7 +292,6 @@ export class GraphBackend implements MailBackend {
     const summary = this.toSummary(message);
     const rawBody = message.body?.content ?? "";
     const isHtml = message.body?.contentType === "html";
-    const text = isHtml ? htmlToPlainText(rawBody) : rawBody;
     const bodyMarkdown = isHtml ? htmlToMarkdown(rawBody).trim() : rawBody.trim();
     const rawHeaders = this.rawHeadersOf(message);
     return {
