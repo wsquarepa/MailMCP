@@ -38,7 +38,7 @@ describe("ImapSmtpBackend reads (requires GreenMail)", () => {
     const id = messages.find((m) => m.subject === subject)?.id;
     expect(id).toBeDefined();
     const full = await backend.getMessage(id!);
-    expect(full.bodyText).toContain("First line of the body.");
+    expect(full.bodyMarkdown).toContain("First line of the body.");
     expect(full.rawHeaders.toLowerCase()).toContain("x-spam-score");
     expect(full.from?.address).toBe("sender@example.test");
     expect(full.attachments[0]?.filename).toBe("big.bin");

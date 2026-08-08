@@ -60,7 +60,7 @@ export function runMailBackendContract(descriptor: BackendDescriptor): void {
     it("gets the full message", async () => {
       const full = await backend.getMessage(await idOf(marker, null));
       expect(full.subject).toBe(marker);
-      expect(full.bodyText).toContain("body of");
+      expect(full.bodyMarkdown).toContain("body of");
       expect(full.rawHeaders.length).toBeGreaterThan(0);
     });
 
@@ -98,7 +98,7 @@ export function runMailBackendContract(descriptor: BackendDescriptor): void {
       });
       const updatedId = await backend.updateDraft(draftId, { ...EMPTY, body: "v2" });
       const draft = await backend.getMessage(updatedId);
-      expect(draft.bodyText).toContain("v2");
+      expect(draft.bodyMarkdown).toContain("v2");
       expect(draft.subject).toBe(`${marker}-draft`);
       const sent = await backend.sendDraft(updatedId);
       expect(sent.recipients.map((r) => r.address)).toContain(descriptor.selfAddress.address);

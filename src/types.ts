@@ -41,8 +41,6 @@ export interface MessageFull extends MessageSummary {
   to: Address[];
   cc: Address[];
   auth: AuthResults;
-  bodyText: string;
-  bodyTruncated: boolean;
   // Markdown-converted display body (trimmed, untruncated; windowing is the
   // tool layer's job) and the unconverted stored body (verbatim).
   bodyMarkdown: string;

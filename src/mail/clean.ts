@@ -69,8 +69,3 @@ export function windowBody(text: string, offset: number, maxChars: number): Body
   const end = Math.min(offset + maxChars, text.length);
   return { text: text.slice(offset, end), start: offset, end, total: text.length };
 }
-
-export function truncateBody(text: string, maxChars: number): { text: string; truncated: boolean } {
-  if (text.length <= maxChars) return { text, truncated: false };
-  return { text: text.slice(0, maxChars), truncated: true };
-}

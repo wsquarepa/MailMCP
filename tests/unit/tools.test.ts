@@ -22,6 +22,8 @@ class FakeBackend implements MailBackend {
   lastDraft: DraftInput | null = null;
   sendWarning: string | null = null;
   attachmentContent: Buffer = Buffer.from("hi");
+  bodyMarkdown = "body";
+  bodyRaw = "<p>body</p>";
   async listFolders(): Promise<Folder[]> { return [{ name: "INBOX", specialUse: "inbox" }]; }
   async listMessages(options: ListOptions): Promise<MessageSummary[]> {
     this.calls.push(`listMessages:${options.includeRead}:${options.limit}:${options.offset}`);
@@ -32,7 +34,7 @@ class FakeBackend implements MailBackend {
     return {
       ...SUMMARY, replyTo: null, returnPath: null, to: [], cc: [],
       auth: { spf: null, dkim: null, dkimDomain: null, dmarc: null },
-      bodyText: "body", bodyTruncated: false, bodyMarkdown: "body", bodyRaw: "<p>body</p>",
+      bodyMarkdown: this.bodyMarkdown, bodyRaw: this.bodyRaw,
       attachments: [], rawHeaders: "H: v",
     };
   }
@@ -297,6 +299,39 @@ describe("tool layer", () => {
     const result = await client.callTool({ name: "get_attachment", arguments: { id: "INBOX:1", index: 0 } });
     expect(backend.calls).toContain(`getAttachment:${10 * 1024 * 1024}`);
     expect(textOf(result)).toContain("hi");
+  });
+
+  it("get_message serves markdown by default and the raw body on request", async () => {
+    const backend = new FakeBackend();
+    const { client } = await connect(0, backend);
+    const md = textOf(await client.callTool({ name: "get_message", arguments: { id: "INBOX:1" } }));
+    expect(md).toContain("body");
+    expect(md).not.toContain("<p>");
+    const raw = textOf(await client.callTool({
+      name: "get_message", arguments: { id: "INBOX:1", raw: true },
+    }));
+    expect(raw).toContain("<p>body</p>");
+  });
+
+  it("get_message pages with body_offset and rejects past-end offsets", async () => {
+    const backend = new FakeBackend();
+    backend.bodyMarkdown = "a".repeat(30_000) + "tail";
+    const { client } = await connect(0, backend);
+    const first = textOf(await client.callTool({ name: "get_message", arguments: { id: "INBOX:1" } }));
+    expect(first).toContain(
+      "[body continues: showing chars 0-30000 of 30004; call get_message again with body_offset=30000]",
+    );
+    expect(first).not.toContain("tail");
+    const second = textOf(await client.callTool({
+      name: "get_message", arguments: { id: "INBOX:1", body_offset: 30_000 },
+    }));
+    expect(second).toContain("tail");
+    expect(second).not.toContain("[body continues");
+    const past = await client.callTool({
+      name: "get_message", arguments: { id: "INBOX:1", body_offset: 99_999 },
+    });
+    expect(past.isError).toBe(true);
+    expect(textOf(past)).toContain("30004");
   });
 
   it("send_draft confirms recipients and surfaces warnings", async () => {

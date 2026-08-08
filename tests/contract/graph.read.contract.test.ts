@@ -77,7 +77,7 @@ describe("GraphBackend reads (fake Graph)", () => {
     const full = await backend.getMessage(shortId);
     expect(full.subject).toBe("graph-read");
     expect(full.auth.spf).toBe("pass");
-    expect(full.bodyText).toContain("Graph body line.");
+    expect(full.bodyMarkdown).toContain("Graph body line.");
     expect(full.rawHeaders).toContain("X-Spam-Score");
   });
 

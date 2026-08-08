@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { windowBody } from "../../src/mail/clean.js";
 import { formatBulk, formatListing, formatMessage } from "../../src/mail/format.js";
 import type { MessageFull, MessageSummary } from "../../src/types.js";
 
@@ -34,15 +35,16 @@ describe("formatMessage", () => {
     to: [{ name: "", address: "hermes@example.org" }],
     cc: [],
     auth: { spf: "pass", dkim: "pass", dkimDomain: "github.test", dmarc: "pass" },
-    bodyText: "Full body here.",
-    bodyTruncated: false,
     bodyMarkdown: "Full body here.",
     bodyRaw: "<p>Full body here.</p>",
     attachments: [],
     rawHeaders: "Received: from x\r\nFrom: GitHub <notifications@github.test>",
   };
   it("leads with envelope, then auth summary, then body", () => {
-    const text = formatMessage("hermes", FULL, false);
+    const text = formatMessage("hermes", FULL, {
+      includeRawHeaders: false,
+      body: windowBody(FULL.bodyMarkdown, 0, 30_000),
+    });
     const envelopeIndex = text.indexOf("From: GitHub <notifications@github.test>");
     const authIndex = text.indexOf("SPF pass · DKIM pass (github.test) · DMARC pass");
     const bodyIndex = text.indexOf("Full body here.");
@@ -52,11 +54,28 @@ describe("formatMessage", () => {
     expect(text).not.toContain("Received: from x");
   });
   it("appends raw headers only on request", () => {
-    expect(formatMessage("hermes", FULL, true)).toContain("Received: from x");
+    const text = formatMessage("hermes", FULL, {
+      includeRawHeaders: true,
+      body: windowBody(FULL.bodyMarkdown, 0, 30_000),
+    });
+    expect(text).toContain("Received: from x");
   });
-  it("notes truncation explicitly", () => {
-    const text = formatMessage("hermes", { ...FULL, bodyTruncated: true }, false);
-    expect(text).toContain("[body truncated");
+  it("notes the continuation point for windowed bodies", () => {
+    const text = formatMessage("hermes", FULL, {
+      includeRawHeaders: false,
+      body: { text: "Full", start: 0, end: 4, total: 20 },
+    });
+    expect(text).toContain(
+      "[body continues: showing chars 0-4 of 20; call get_message again with body_offset=4]",
+    );
+  });
+
+  it("emits no note when the window reaches the end", () => {
+    const text = formatMessage("hermes", FULL, {
+      includeRawHeaders: false,
+      body: { text: "tail", start: 16, end: 20, total: 20 },
+    });
+    expect(text).not.toContain("[body continues");
   });
 });
 

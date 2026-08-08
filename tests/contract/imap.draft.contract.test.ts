@@ -54,7 +54,7 @@ describe("ImapSmtpBackend drafts (requires GreenMail)", () => {
     expect(updatedId).not.toBe(draftId);
     const updated = await backend.getMessage(updatedId);
     expect(updated.subject).toBe(`${marker}-v2`);
-    expect(updated.bodyTruncated).toBe(true);            // >50k body survived the update
+    expect(updated.bodyMarkdown.length).toBeGreaterThan(50_000); // >50k body survived the update
     expect(updated.attachments).toHaveLength(1);          // attachment bytes survived
 
     const sent = await backend.sendDraft(updatedId);

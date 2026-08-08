@@ -11,8 +11,7 @@ import {
 import { logger } from "../logger.js";
 import { parseAuthResults } from "../mail/authresults.js";
 import {
-  BODY_MAX_CHARS, SNIPPET_MAX_CHARS, htmlToMarkdown, htmlToPlainText, makeSnippet,
-  stripQuotedAndSignature, truncateBody,
+  SNIPPET_MAX_CHARS, htmlToMarkdown, htmlToPlainText, makeSnippet, stripQuotedAndSignature,
 } from "../mail/clean.js";
 import type {
   Address, AttachmentContent, AttachmentMeta, BulkResult, DraftInput, Folder,
@@ -303,7 +302,6 @@ export class ImapSmtpBackend implements MailBackend {
     const parsed = await simpleParser(source);
     const rawHeaders = parsed.headerLines.map((h) => h.line).join("\r\n");
     const plainText = parsed.text ?? (parsed.html !== false ? htmlToPlainText(parsed.html) : "");
-    const { text: bodyText, truncated } = truncateBody(plainText.trim(), BODY_MAX_CHARS);
     const bodyMarkdown = parsed.html !== false ? htmlToMarkdown(parsed.html).trim() : (parsed.text ?? "").trim();
     const bodyRaw = parsed.html !== false ? parsed.html : parsed.text ?? "";
     const structure = await this.bodyStructureOf(folder, uid);
@@ -328,8 +326,6 @@ export class ImapSmtpBackend implements MailBackend {
       to: toAddress(parsed.to),
       cc: toAddress(parsed.cc),
       auth: parseAuthResults(rawHeaders),
-      bodyText,
-      bodyTruncated: truncated,
       bodyMarkdown,
       bodyRaw,
       attachments,

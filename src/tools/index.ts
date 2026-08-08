@@ -6,7 +6,7 @@ import { accessibleMailboxes, requirePermission } from "../auth.js";
 import type { Permission } from "../config.js";
 import { InvalidInputError, ToolError } from "../errors.js";
 import { logger } from "../logger.js";
-import { ATTACHMENT_MAX_BYTES } from "../mail/clean.js";
+import { ATTACHMENT_MAX_BYTES, BODY_MAX_CHARS, windowBody } from "../mail/clean.js";
 import {
   formatAccounts, formatBulk, formatFolders, formatListing, formatMessage,
 } from "../mail/format.js";
@@ -256,15 +256,28 @@ export function registerTools(server: McpServer, context: ToolContext): void {
   }));
 
   server.registerTool("get_message", {
-    description: "Read a full message: envelope, auth summary (SPF/DKIM/DMARC), cleaned body. Set raw_headers for the complete header block.",
+    description: "Read a full message: envelope, auth summary (SPF/DKIM/DMARC), body as markdown with links preserved. Set raw for the unconverted stored body (HTML when the message has one). Bodies over 30000 chars are windowed; follow the body_offset hint in the output to page. Set raw_headers for the complete header block.",
     inputSchema: {
       mailbox: z.string().optional(),
       id: z.string(),
+      raw: z.boolean().optional(),
       raw_headers: z.boolean().optional(),
+      body_offset: z.number().int().min(0).optional(),
     },
   }, async (args) => runTool("get_message", key.name, args.mailbox ?? null, async () => {
     const { name, backend } = gate(args.mailbox, "read");
-    return text(formatMessage(name, await backend.getMessage(args.id), args.raw_headers ?? false));
+    const message = await backend.getMessage(args.id);
+    const body = args.raw === true ? message.bodyRaw : message.bodyMarkdown;
+    const offset = args.body_offset ?? 0;
+    if (offset > 0 && offset >= body.length) {
+      throw new InvalidInputError(
+        `body_offset ${offset} is past the end of the body (${body.length} characters). Use an offset below ${body.length}.`,
+      );
+    }
+    return text(formatMessage(name, message, {
+      includeRawHeaders: args.raw_headers ?? false,
+      body: windowBody(body, offset, BODY_MAX_CHARS),
+    }));
   }));
 
   server.registerTool("get_attachment", {

@@ -1,6 +1,7 @@
 import type { MailboxAccess } from "../auth.js";
 import type { Folder, MessageFull, MessageSummary, BulkResult, Address } from "../types.js";
 import { formatAuthSummary } from "./authresults.js";
+import type { BodyWindow } from "./clean.js";
 
 export function formatDate(date: Date | null): string {
   if (date === null) return "unknown-date";
@@ -39,7 +40,12 @@ export function formatListing(
   return [`${mailbox} ${folder}: ${totalNote}`, "", ...blocks].join("\n");
 }
 
-export function formatMessage(mailbox: string, message: MessageFull, includeRawHeaders: boolean): string {
+export interface MessageView {
+  includeRawHeaders: boolean;
+  body: BodyWindow;
+}
+
+export function formatMessage(mailbox: string, message: MessageFull, view: MessageView): string {
   const lines = [
     `[${mailbox} ${message.id}] ${message.unread ? "unread" : "read"}`,
     `From: ${formatAddress(message.from)}`,
@@ -57,11 +63,14 @@ export function formatMessage(mailbox: string, message: MessageFull, includeRawH
       .join("\n");
     lines.push(`Attachments:\n${atts}`);
   }
-  lines.push("", message.bodyText);
-  if (message.bodyTruncated) {
-    lines.push("", "[body truncated at 50000 characters; full message exceeds display cap]");
+  lines.push("", view.body.text);
+  if (view.body.end < view.body.total) {
+    lines.push(
+      "",
+      `[body continues: showing chars ${view.body.start}-${view.body.end} of ${view.body.total}; call get_message again with body_offset=${view.body.end}]`,
+    );
   }
-  if (includeRawHeaders) lines.push("", "--- raw headers ---", message.rawHeaders);
+  if (view.includeRawHeaders) lines.push("", "--- raw headers ---", message.rawHeaders);
   return lines.join("\n");
 }
 

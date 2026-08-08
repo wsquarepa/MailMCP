@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { simpleParser } from "mailparser";
 import { describe, expect, it } from "vitest";
 import {
-  htmlToMarkdown, htmlToPlainText, makeSnippet, stripQuotedAndSignature, truncateBody, windowBody,
+  htmlToMarkdown, htmlToPlainText, makeSnippet, stripQuotedAndSignature, windowBody,
 } from "../../src/mail/clean.js";
 
 describe("htmlToPlainText", () => {
@@ -42,17 +42,6 @@ describe("makeSnippet", () => {
   });
   it("returns short text unchanged", () => {
     expect(makeSnippet("Short body.", 200)).toBe("Short body.");
-  });
-});
-
-describe("truncateBody", () => {
-  it("flags truncation and keeps text under the cap", () => {
-    const { text, truncated } = truncateBody("x".repeat(60_000), 50_000);
-    expect(truncated).toBe(true);
-    expect(text.length).toBe(50_000);
-  });
-  it("passes small bodies through", () => {
-    expect(truncateBody("hi", 50_000)).toEqual({ text: "hi", truncated: false });
   });
 });
 

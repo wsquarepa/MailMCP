@@ -47,7 +47,7 @@ describe("GraphBackend writes (fake Graph)", () => {
     expect(draftId).toMatch(/^g:/);
     const updatedId = await backend.updateDraft(draftId, { ...EMPTY, body: "v2" });
     const draft = await backend.getMessage(updatedId);
-    expect(draft.bodyText).toBe("v2");
+    expect(draft.bodyMarkdown).toBe("v2");
     expect(draft.subject).toBe("hello");
     const sent = await backend.sendDraft(updatedId);
     expect(sent.warning).toBeNull();
@@ -60,7 +60,7 @@ describe("GraphBackend writes (fake Graph)", () => {
     const reply = await backend.getMessage(replyId);
     expect(reply.subject).toBe("Re: incoming");
     expect(reply.to[0]?.address).toBe("s@x.test");
-    expect(reply.bodyText).toBe("my reply");
+    expect(reply.bodyMarkdown).toBe("my reply");
   });
 
   it("moves to junk with per-id results and stable ids", async () => {
