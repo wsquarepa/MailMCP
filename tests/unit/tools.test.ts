@@ -321,6 +321,7 @@ describe("tool layer", () => {
     expect(first).toContain(
       "[body continues: showing chars 0-30000 of 30004; call get_message again with body_offset=30000]",
     );
+    expect(first).not.toContain("raw=true");
     expect(first).not.toContain("tail");
     const second = textOf(await client.callTool({
       name: "get_message", arguments: { id: "INBOX:1", body_offset: 30_000 },
@@ -332,6 +333,28 @@ describe("tool layer", () => {
     });
     expect(past.isError).toBe(true);
     expect(textOf(past)).toContain("30004");
+  });
+
+  it("get_message raw paging hint carries raw=true", async () => {
+    const backend = new FakeBackend();
+    backend.bodyRaw = "r".repeat(30_000) + "tail";
+    const { client } = await connect(0, backend);
+    const first = textOf(await client.callTool({
+      name: "get_message", arguments: { id: "INBOX:1", raw: true },
+    }));
+    expect(first).toContain("call get_message again with body_offset=30000 and raw=true]");
+  });
+
+  it("get_message rejects body_offset on an empty body with tailored guidance", async () => {
+    const backend = new FakeBackend();
+    backend.bodyMarkdown = "";
+    const { client } = await connect(0, backend);
+    const result = await client.callTool({
+      name: "get_message", arguments: { id: "INBOX:1", body_offset: 5 },
+    });
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toContain("empty");
+    expect(textOf(result)).toContain("without body_offset");
   });
 
   it("send_draft confirms recipients and surfaces warnings", async () => {

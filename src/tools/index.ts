@@ -267,8 +267,14 @@ export function registerTools(server: McpServer, context: ToolContext): void {
   }, async (args) => runTool("get_message", key.name, args.mailbox ?? null, async () => {
     const { name, backend } = gate(args.mailbox, "read");
     const message = await backend.getMessage(args.id);
-    const body = args.raw === true ? message.bodyRaw : message.bodyMarkdown;
+    const raw = args.raw === true;
+    const body = raw ? message.bodyRaw : message.bodyMarkdown;
     const offset = args.body_offset ?? 0;
+    if (offset > 0 && body.length === 0) {
+      throw new InvalidInputError(
+        `body_offset ${offset} was provided but the ${raw ? "raw" : "markdown"} body is empty. Call get_message without body_offset.`,
+      );
+    }
     if (offset > 0 && offset >= body.length) {
       throw new InvalidInputError(
         `body_offset ${offset} is past the end of the body (${body.length} characters). Use an offset below ${body.length}.`,
@@ -276,6 +282,7 @@ export function registerTools(server: McpServer, context: ToolContext): void {
     }
     return text(formatMessage(name, message, {
       includeRawHeaders: args.raw_headers ?? false,
+      raw,
       body: windowBody(body, offset, BODY_MAX_CHARS),
     }));
   }));

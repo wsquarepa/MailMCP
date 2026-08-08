@@ -42,6 +42,7 @@ export function formatListing(
 
 export interface MessageView {
   includeRawHeaders: boolean;
+  raw: boolean;
   body: BodyWindow;
 }
 
@@ -65,9 +66,10 @@ export function formatMessage(mailbox: string, message: MessageFull, view: Messa
   }
   lines.push("", view.body.text);
   if (view.body.end < view.body.total) {
+    const rawHint = view.raw ? " and raw=true" : "";
     lines.push(
       "",
-      `[body continues: showing chars ${view.body.start}-${view.body.end} of ${view.body.total}; call get_message again with body_offset=${view.body.end}]`,
+      `[body continues: showing chars ${view.body.start}-${view.body.end} of ${view.body.total}; call get_message again with body_offset=${view.body.end}${rawHint}]`,
     );
   }
   if (view.includeRawHeaders) lines.push("", "--- raw headers ---", message.rawHeaders);

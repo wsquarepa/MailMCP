@@ -43,6 +43,7 @@ describe("formatMessage", () => {
   it("leads with envelope, then auth summary, then body", () => {
     const text = formatMessage("hermes", FULL, {
       includeRawHeaders: false,
+      raw: false,
       body: windowBody(FULL.bodyMarkdown, 0, 30_000),
     });
     const envelopeIndex = text.indexOf("From: GitHub <notifications@github.test>");
@@ -56,6 +57,7 @@ describe("formatMessage", () => {
   it("appends raw headers only on request", () => {
     const text = formatMessage("hermes", FULL, {
       includeRawHeaders: true,
+      raw: false,
       body: windowBody(FULL.bodyMarkdown, 0, 30_000),
     });
     expect(text).toContain("Received: from x");
@@ -63,6 +65,7 @@ describe("formatMessage", () => {
   it("notes the continuation point for windowed bodies", () => {
     const text = formatMessage("hermes", FULL, {
       includeRawHeaders: false,
+      raw: false,
       body: { text: "Full", start: 0, end: 4, total: 20 },
     });
     expect(text).toContain(
@@ -70,9 +73,21 @@ describe("formatMessage", () => {
     );
   });
 
+  it("appends raw=true to the continuation note for raw bodies", () => {
+    const text = formatMessage("hermes", FULL, {
+      includeRawHeaders: false,
+      raw: true,
+      body: { text: "Full", start: 0, end: 4, total: 20 },
+    });
+    expect(text).toContain(
+      "[body continues: showing chars 0-4 of 20; call get_message again with body_offset=4 and raw=true]",
+    );
+  });
+
   it("emits no note when the window reaches the end", () => {
     const text = formatMessage("hermes", FULL, {
       includeRawHeaders: false,
+      raw: false,
       body: { text: "tail", start: 16, end: 20, total: 20 },
     });
     expect(text).not.toContain("[body continues");
