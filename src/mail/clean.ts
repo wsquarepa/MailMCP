@@ -5,7 +5,7 @@ import { gfm } from "turndown-plugin-gfm";
 export const SNIPPET_MAX_CHARS = 200;
 // Display cap for get_message output only. Draft update/send paths always
 // operate on the raw stored draft, never on text truncated by this cap.
-export const BODY_MAX_CHARS = 50_000;
+export const BODY_MAX_CHARS = 30_000;
 export const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
 
 const turndown = new TurndownService({
@@ -56,6 +56,18 @@ export function makeSnippet(text: string, maxChars: number): string {
   const cut = collapsed.slice(0, maxChars - 3);
   const lastSpace = cut.lastIndexOf(" ");
   return `${cut.slice(0, lastSpace > 0 ? lastSpace : cut.length)}...`;
+}
+
+export interface BodyWindow {
+  text: string;
+  start: number;
+  end: number;
+  total: number;
+}
+
+export function windowBody(text: string, offset: number, maxChars: number): BodyWindow {
+  const end = Math.min(offset + maxChars, text.length);
+  return { text: text.slice(offset, end), start: offset, end, total: text.length };
 }
 
 export function truncateBody(text: string, maxChars: number): { text: string; truncated: boolean } {

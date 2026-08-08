@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { simpleParser } from "mailparser";
 import { describe, expect, it } from "vitest";
 import {
-  htmlToMarkdown, htmlToPlainText, makeSnippet, stripQuotedAndSignature, truncateBody,
+  htmlToMarkdown, htmlToPlainText, makeSnippet, stripQuotedAndSignature, truncateBody, windowBody,
 } from "../../src/mail/clean.js";
 
 describe("htmlToPlainText", () => {
@@ -53,6 +53,28 @@ describe("truncateBody", () => {
   });
   it("passes small bodies through", () => {
     expect(truncateBody("hi", 50_000)).toEqual({ text: "hi", truncated: false });
+  });
+});
+
+describe("windowBody", () => {
+  it("returns the whole text when it fits", () => {
+    expect(windowBody("hello", 0, 30_000)).toEqual({ text: "hello", start: 0, end: 5, total: 5 });
+  });
+
+  it("slices a first window ending at the cap", () => {
+    expect(windowBody("abcdef", 0, 4)).toEqual({ text: "abcd", start: 0, end: 4, total: 6 });
+  });
+
+  it("slices a mid-body window shorter than the cap", () => {
+    expect(windowBody("abcdef", 4, 4)).toEqual({ text: "ef", start: 4, end: 6, total: 6 });
+  });
+
+  it("handles an exact-boundary final window", () => {
+    expect(windowBody("abcdefgh", 4, 4)).toEqual({ text: "efgh", start: 4, end: 8, total: 8 });
+  });
+
+  it("handles an empty body at offset zero", () => {
+    expect(windowBody("", 0, 30_000)).toEqual({ text: "", start: 0, end: 0, total: 0 });
   });
 });
 
