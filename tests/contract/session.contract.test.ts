@@ -1,6 +1,7 @@
+import { setTimeout as delay } from "node:timers/promises";
 import { ImapFlow } from "imapflow";
 import { afterAll, describe, expect, it } from "vitest";
-import { NotFoundError } from "../../src/errors.js";
+import { BackendUnavailableError, NotFoundError } from "../../src/errors.js";
 import { ImapSession } from "../../src/imap/session.js";
 import { imapMailboxConfig, TEST_USER } from "../helpers/greenmail.js";
 
@@ -66,6 +67,38 @@ describe("ImapSession (requires GreenMail)", () => {
     } finally {
       await stale.close();
       await external.logout();
+    }
+  });
+
+  it("withClientDeadline returns the value when fn finishes inside the deadline", async () => {
+    const folders = await session.withClientDeadline(5_000, async (client) =>
+      (await client.list()).map((f) => f.path),
+    );
+    expect(folders).toContain("INBOX");
+  });
+
+  it("withClientDeadline tears down the connection on expiry and the session recovers", async () => {
+    const slow = new ImapSession("deadline", imapMailboxConfig());
+    try {
+      const start = Date.now();
+      const error = await slow.withClientDeadline(200, async (client) => {
+        const lock = await client.getMailboxLock("INBOX");
+        try {
+          await delay(3_000);
+        } finally {
+          lock.release();
+        }
+      }).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(BackendUnavailableError);
+      expect(String(error)).toMatch(/timed out after 200ms/);
+      expect(Date.now() - start).toBeLessThan(2_000);
+      // A fresh connection must not inherit the dead one's mailbox lock.
+      const folders = await slow.withClient(async (client) =>
+        (await client.list()).map((f) => f.path),
+      );
+      expect(folders).toContain("INBOX");
+    } finally {
+      await slow.close();
     }
   });
 

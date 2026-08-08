@@ -20,6 +20,10 @@ import type {
 import { ImapSession, type ImapMailboxConfig } from "./session.js";
 
 const SNIPPET_FETCH_BYTES = 2048;
+// Free-text SEARCH on servers without full-text indexing (Dovecot default)
+// scans message bodies linearly; observed up to 29s in production. Bound it
+// so the tool call fails fast with guidance instead of hanging.
+const SEARCH_TIMEOUT_MS = 30_000;
 
 export function parseImapId(id: string): { folder: string; uid: number } {
   const separator = id.lastIndexOf(":");
@@ -259,7 +263,7 @@ export class ImapSmtpBackend implements MailBackend {
 
   async search(options: SearchOptions): Promise<MessageSummary[]> {
     const folder = options.folder ?? (await this.inboxFolder());
-    const uids = await this.session.withClient(async (client) => {
+    const uids = await this.session.withClientDeadline(SEARCH_TIMEOUT_MS, async (client) => {
       const lock = await this.lockForRead(client, folder);
       try {
         const criteria: Record<string, unknown> = {};

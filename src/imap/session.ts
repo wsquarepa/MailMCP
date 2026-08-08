@@ -83,6 +83,32 @@ export class ImapSession {
     }
   }
 
+  // Bounded variant for commands whose duration is server-controlled (an
+  // unindexed SEARCH scans message bodies linearly). On expiry the client is
+  // closed so the in-flight command aborts and its mailbox lock dies with the
+  // connection; the next call reconnects lazily. No replay: a command that
+  // exceeded the deadline once would almost certainly exceed it again.
+  async withClientDeadline<T>(timeoutMs: number, fn: (client: ImapFlow) => Promise<T>): Promise<T> {
+    return this.withClientOnce(async (client) => {
+      let timer: NodeJS.Timeout | undefined;
+      const expiry = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          this.client = null;
+          client.close();
+          reject(new BackendUnavailableError(
+            this.mailboxName,
+            `command timed out after ${timeoutMs}ms; the server is scanning slowly. Narrow the search, e.g. subject/from/since criteria instead of a free-text query`,
+          ));
+        }, timeoutMs);
+      });
+      try {
+        return await Promise.race([fn(client), expiry]);
+      } finally {
+        clearTimeout(timer);
+      }
+    });
+  }
+
   // Non-idempotent commands (APPEND, MOVE, delete): one attempt, no replay.
   async withClientOnce<T>(fn: (client: ImapFlow) => Promise<T>): Promise<T> {
     try {
