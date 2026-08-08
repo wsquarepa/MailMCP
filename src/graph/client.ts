@@ -18,6 +18,7 @@ export interface GraphConnection {
   baseUrl: string;
   mailboxName: string;
   getToken: () => Promise<string>;
+  requestTimeoutMs: number;
 }
 
 function retryDelayMs(retryAfter: string | null, attempt: number): number {
@@ -37,6 +38,7 @@ type GraphMethod = "GET" | "POST" | "PATCH" | "DELETE";
 type Attempt<T> =
   | { kind: "ok"; value: T }
   | { kind: "network"; message: string }
+  | { kind: "timeout"; message: string }
   | { kind: "retryable"; status: number; body: string; retryAfter: string | null };
 
 async function attemptOnce<T>(
@@ -56,8 +58,15 @@ async function attemptOnce<T>(
         ...(body !== null ? { "content-type": "application/json" } : {}),
       },
       body: body !== null ? JSON.stringify(body) : null,
+      signal: AbortSignal.timeout(connection.requestTimeoutMs),
     });
   } catch (networkError) {
+    if (networkError instanceof DOMException && networkError.name === "TimeoutError") {
+      return {
+        kind: "timeout",
+        message: `request timed out after ${connection.requestTimeoutMs}ms on ${method} ${path}`,
+      };
+    }
     return { kind: "network", message: `network failure on ${method} ${path}: ${String(networkError)}` };
   }
   if (response.status === 401) throw new AuthExpiredError(connection.mailboxName);
@@ -79,6 +88,9 @@ async function attemptOnce<T>(
 
 // Idempotent requests (reads, PATCH, DELETE): network failures and 429/5xx
 // are retried up to MAX_ATTEMPTS, since replaying them is always safe.
+// Timeouts are not retried: a server still grinding on a slow operation
+// (e.g. a $search over a large mailbox) will almost certainly exceed the
+// deadline again, so retrying only multiplies the wait.
 export async function graphRequest<T>(
   connection: GraphConnection,
   method: GraphMethod,
@@ -89,6 +101,13 @@ export async function graphRequest<T>(
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
     const result = await attemptOnce<T>(connection, method, path, body);
     if (result.kind === "ok") return result.value;
+    if (result.kind === "timeout") {
+      logger.warn({ mailbox: connection.mailboxName, attempt, error: result.message }, "graph request timed out");
+      throw new BackendUnavailableError(
+        connection.mailboxName,
+        `${result.message}; the server is responding slowly. Retry later, or narrow the operation, e.g. tighter search criteria such as since/before or subject instead of a free-text query`,
+      );
+    }
     if (result.kind === "network") {
       lastFailure = result.message;
       logger.warn({ mailbox: connection.mailboxName, attempt, error: result.message }, "graph network failure");
@@ -120,7 +139,7 @@ export async function graphRequestOnce<T>(
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
     const result = await attemptOnce<T>(connection, method, path, body);
     if (result.kind === "ok") return result.value;
-    if (result.kind === "network") {
+    if (result.kind === "network" || result.kind === "timeout") {
       throw new BackendUnavailableError(
         connection.mailboxName,
         `${result.message}; the request may or may not have completed; verify before retrying`,

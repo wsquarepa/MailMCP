@@ -7,6 +7,10 @@ import type { MailBackend } from "../types.js";
 import type { UploadStore } from "../uploads.js";
 
 export const GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0";
+// Healthy Graph calls complete in well under 10s; the outliers are Exchange's
+// $search substrate grinding (observed up to 182s in production). Fail fast
+// with guidance to narrow the query instead of hanging the tool call.
+export const GRAPH_REQUEST_TIMEOUT_MS = 30_000;
 
 export interface ToolContext {
   config: Config;
@@ -26,6 +30,7 @@ export function buildBackends(config: Config, graphCacheDir: string): Map<string
         baseUrl: GRAPH_BASE_URL,
         mailboxName: name,
         getToken: () => tokens.getToken(),
+        requestTimeoutMs: GRAPH_REQUEST_TIMEOUT_MS,
       }));
     }
   }

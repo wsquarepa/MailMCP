@@ -51,7 +51,7 @@ describe("GraphBackend reads (fake Graph)", () => {
       body: "draft body", isRead: true, receivedAt: new Date("2026-08-06T16:00:00.250Z"), headers: {},
     });
     backend = new GraphBackend("school", CONFIG, {
-      baseUrl, mailboxName: "school", getToken: async () => "test-token",
+      baseUrl, mailboxName: "school", getToken: async () => "test-token", requestTimeoutMs: 5000,
     });
   });
   afterAll(async () => await fake.stop());

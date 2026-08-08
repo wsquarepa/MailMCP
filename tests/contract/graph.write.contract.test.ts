@@ -28,7 +28,7 @@ describe("GraphBackend writes (fake Graph)", () => {
       body: "please reply", isRead: false, receivedAt: new Date("2026-08-06T12:00:05.100Z"), headers: {},
     });
     backend = new GraphBackend("school", CONFIG, {
-      baseUrl, mailboxName: "school", getToken: async () => "test-token",
+      baseUrl, mailboxName: "school", getToken: async () => "test-token", requestTimeoutMs: 5000,
     });
     const inbox = await backend.listMessages({ folder: null, includeRead: true, limit: 10, offset: 0 });
     inboxShortId = inbox.find((m) => m.subject === "incoming")!.id;

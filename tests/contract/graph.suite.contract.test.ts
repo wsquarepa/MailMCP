@@ -13,7 +13,7 @@ runMailBackendContract({
     const backend = new GraphBackend("suite", {
       backend: "graph", address: "Agent <school@school.test>",
       graph: { tenant_id: "t", client_id: "c" },
-    }, { baseUrl, mailboxName: "suite", getToken: async () => "tok" });
+    }, { baseUrl, mailboxName: "suite", getToken: async () => "tok", requestTimeoutMs: 5000 });
     return { backend, cleanup: async () => { await backend.close(); await fake.stop(); } };
   },
   seed: async (subject, body) => {
