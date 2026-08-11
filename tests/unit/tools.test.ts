@@ -1,7 +1,8 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { logger } from "../../src/logger.js";
 import type { Config } from "../../src/config.js";
 import { registerTools } from "../../src/tools/index.js";
 import type { ToolContext } from "../../src/tools/registry.js";
@@ -145,6 +146,29 @@ describe("tool layer", () => {
     });
     expect(result.isError ?? false).toBe(false);
     expect(backend.lastSearch?.before?.toISOString()).toBe("2026-07-25T00:00:00.000Z");
+  });
+
+  it("logs unexpected failures with the error object so stacks reach the log", async () => {
+    const backend = new FakeBackend();
+    backend.search = async (): Promise<MessageSummary[]> => {
+      throw new TypeError("boom");
+    };
+    const errorSpy = vi.spyOn(logger, "error").mockImplementation(() => undefined);
+    try {
+      const { client } = await connect(0, backend);
+      const result = await client.callTool({ name: "search_messages", arguments: {} });
+      expect(result.isError).toBe(true);
+      expect(textOf(result)).toContain("Internal server error");
+      const logged = errorSpy.mock.calls.find(
+        (call) => (call[0] as { tool?: string }).tool === "search_messages",
+      );
+      expect(logged).toBeDefined();
+      const err = (logged![0] as { err?: unknown }).err;
+      expect(err).toBeInstanceOf(TypeError);
+      expect((err as TypeError).stack).toContain("boom");
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 
   it("denies without permission, naming the gap", async () => {

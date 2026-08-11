@@ -47,7 +47,10 @@ async function runTool(
     if (error instanceof ToolError) {
       return { isError: true, content: [{ type: "text", text: error.message }] };
     }
-    logger.error({ key: keyName, tool: toolName, error: String(error) }, "unexpected tool failure");
+    logger.error(
+      { key: keyName, tool: toolName, err: error instanceof Error ? error : new Error(String(error)) },
+      "unexpected tool failure",
+    );
     return {
       isError: true,
       content: [{ type: "text", text: "Internal server error; the operator should check server logs." }],
