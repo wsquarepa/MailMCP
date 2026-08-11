@@ -113,11 +113,14 @@ export class GraphBackend implements MailBackend {
     const map = new Map<string, string>();
     let path: string | null = "/me/mailFolders?$top=100";
     while (path !== null) {
-      const page: { value: { id: string; displayName: string; wellKnownName?: string }[]; "@odata.nextLink"?: string } =
+      // wellKnownName is an explicit JSON null on user-created folders.
+      const page: { value: { id: string; displayName: string; wellKnownName?: string | null }[]; "@odata.nextLink"?: string } =
         await this.request("GET", path, null, null);
       for (const folder of page.value) {
         map.set(folder.displayName.toLowerCase(), folder.id);
-        if (folder.wellKnownName !== undefined) map.set(folder.wellKnownName.toLowerCase(), folder.id);
+        if (folder.wellKnownName !== undefined && folder.wellKnownName !== null) {
+          map.set(folder.wellKnownName.toLowerCase(), folder.id);
+        }
       }
       path = page["@odata.nextLink"] !== undefined
         ? page["@odata.nextLink"].replace(this.connection.baseUrl, "")
@@ -208,7 +211,7 @@ export class GraphBackend implements MailBackend {
   }
 
   async listFolders(): Promise<Folder[]> {
-    const folders = await this.request<{ value: { displayName: string; wellKnownName?: string }[] }>(
+    const folders = await this.request<{ value: { displayName: string; wellKnownName?: string | null }[] }>(
       "GET", "/me/mailFolders?$top=100", null, null,
     );
     const roleByWellKnown = new Map(Object.entries(WELL_KNOWN).map(([role, name]) => [name, role]));

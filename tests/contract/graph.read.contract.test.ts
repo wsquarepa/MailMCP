@@ -123,6 +123,20 @@ describe("GraphBackend reads (fake Graph)", () => {
     expect(hits).toHaveLength(0);
   });
 
+  it("searches a user-created folder by display name despite its null wellKnownName", async () => {
+    fake.seed({
+      folder: "custom", subject: "alpha-report", fromName: "PM", fromAddress: "pm@x.test",
+      body: "quarterly report", isRead: true,
+      receivedAt: new Date("2026-08-06T14:00:00Z"), headers: {},
+    });
+    const hits = await backend.search({
+      folder: "Project Alpha", query: null, from: null, subject: "alpha-report",
+      since: null, before: null, unreadOnly: false, limit: 10,
+    });
+    expect(hits).toHaveLength(1);
+    expect(hits[0]?.subject).toBe("alpha-report");
+  });
+
   it("searches with free text and client-side criteria in one folder", async () => {
     const hits = await backend.search({
       folder: null, query: "Graph body", from: "s@x.test", subject: null,

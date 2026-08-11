@@ -22,6 +22,9 @@ export interface FakeMessage {
 }
 
 const FOLDERS = ["inbox", "junkemail", "deleteditems", "archive", "drafts", "sentitems"] as const;
+// User-created folder: real Graph lists it with an explicit JSON null wellKnownName.
+const CUSTOM_FOLDER = "custom";
+const CUSTOM_FOLDER_DISPLAY_NAME = "Project Alpha";
 const folderId = (wellKnown: string): string => `fid-${wellKnown}`;
 
 function renderSecond(ms: number): string {
@@ -139,7 +142,12 @@ export class FakeGraph {
     if (method === "GET" && pathname === "/me/mailFolders") {
       return {
         status: 200,
-        json: { value: FOLDERS.map((f) => ({ id: folderId(f), displayName: f, wellKnownName: f })) },
+        json: {
+          value: [
+            ...FOLDERS.map((f) => ({ id: folderId(f), displayName: f, wellKnownName: f })),
+            { id: folderId(CUSTOM_FOLDER), displayName: CUSTOM_FOLDER_DISPLAY_NAME, wellKnownName: null },
+          ],
+        },
       };
     }
     const listMatch = pathname.match(/^\/me(?:\/mailFolders\/([^/]+))?\/messages$/);
@@ -149,9 +157,9 @@ export class FakeGraph {
       if (scope === undefined) {
         candidates = [...this.messages];
       } else {
-        const wellKnown = FOLDERS.find((f) => f === scope || folderId(f) === scope);
-        if (wellKnown === undefined) return { status: 404, json: { error: { code: "ErrorFolderNotFound" } } };
-        candidates = this.messagesIn(wellKnown);
+        const known = [...FOLDERS, CUSTOM_FOLDER].find((f) => f === scope || folderId(f) === scope);
+        if (known === undefined) return { status: 404, json: { error: { code: "ErrorFolderNotFound" } } };
+        candidates = this.messagesIn(known);
       }
       const filter = query.get("$filter");
       const search = query.get("$search");
