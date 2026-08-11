@@ -16,6 +16,16 @@ import { resolveMailbox, type ToolContext } from "./registry.js";
 
 const TEXT_MIME_PREFIXES = ["text/", "application/json", "application/xml"];
 
+// Matches the zone designators zod's datetime({ offset: true }) admits.
+const ZONE_SUFFIX = /(?:Z|[+-]\d{2}:?\d{2})$/;
+const DATETIME_ARG = z.string().datetime({ offset: true, local: true });
+
+// A zone-less timestamp is pinned to UTC so parsing never depends on the
+// server's timezone.
+function parseDatetimeArg(value: string): Date {
+  return new Date(ZONE_SUFFIX.test(value) ? value : `${value}Z`);
+}
+
 function text(value: string): CallToolResult {
   return { content: [{ type: "text", text: value }] };
 }
@@ -228,15 +238,15 @@ export function registerTools(server: McpServer, context: ToolContext): void {
   }));
 
   server.registerTool("search_messages", {
-    description: "Search one folder (default inbox) by text, sender, subject, or date range.",
+    description: "Search one folder (default inbox) by text, sender, subject, or date range. since/before take ISO 8601 datetimes; a timestamp without a zone designator is treated as UTC.",
     inputSchema: {
       mailbox: z.string().optional(),
       folder: z.string().optional(),
       query: z.string().optional(),
       from: z.string().optional(),
       subject: z.string().optional(),
-      since: z.string().datetime().optional(),
-      before: z.string().datetime().optional(),
+      since: DATETIME_ARG.optional(),
+      before: DATETIME_ARG.optional(),
       unread_only: z.boolean().optional(),
       limit: z.number().int().min(1).max(100).optional(),
     },
@@ -247,8 +257,8 @@ export function registerTools(server: McpServer, context: ToolContext): void {
       query: args.query ?? null,
       from: args.from ?? null,
       subject: args.subject ?? null,
-      since: args.since !== undefined ? new Date(args.since) : null,
-      before: args.before !== undefined ? new Date(args.before) : null,
+      since: args.since !== undefined ? parseDatetimeArg(args.since) : null,
+      before: args.before !== undefined ? parseDatetimeArg(args.before) : null,
       unreadOnly: args.unread_only ?? false,
       limit: args.limit ?? 20,
     });

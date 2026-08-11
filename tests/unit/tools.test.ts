@@ -29,7 +29,11 @@ class FakeBackend implements MailBackend {
     this.calls.push(`listMessages:${options.includeRead}:${options.limit}:${options.offset}`);
     return [SUMMARY];
   }
-  async search(_options: SearchOptions): Promise<MessageSummary[]> { return [SUMMARY]; }
+  lastSearch: SearchOptions | null = null;
+  async search(options: SearchOptions): Promise<MessageSummary[]> {
+    this.lastSearch = options;
+    return [SUMMARY];
+  }
   async getMessage(_id: string): Promise<MessageFull> {
     return {
       ...SUMMARY, replyTo: null, returnPath: null, to: [], cc: [],
@@ -121,6 +125,26 @@ describe("tool layer", () => {
     const result = await client.callTool({ name: "list_messages", arguments: {} });
     expect(backend.calls).toContain("listMessages:false:20:0");
     expect(textOf(result)).toContain("[hermes INBOX:1]");
+  });
+
+  it("search_messages pins an offset-less since to UTC", async () => {
+    const backend = new FakeBackend();
+    const { client } = await connect(0, backend);
+    const result = await client.callTool({
+      name: "search_messages", arguments: { since: "2026-07-25T00:00:00" },
+    });
+    expect(result.isError ?? false).toBe(false);
+    expect(backend.lastSearch?.since?.toISOString()).toBe("2026-07-25T00:00:00.000Z");
+  });
+
+  it("search_messages accepts an explicit offset in before", async () => {
+    const backend = new FakeBackend();
+    const { client } = await connect(0, backend);
+    const result = await client.callTool({
+      name: "search_messages", arguments: { before: "2026-07-25T02:00:00+02:00" },
+    });
+    expect(result.isError ?? false).toBe(false);
+    expect(backend.lastSearch?.before?.toISOString()).toBe("2026-07-25T00:00:00.000Z");
   });
 
   it("denies without permission, naming the gap", async () => {
