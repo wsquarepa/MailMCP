@@ -137,6 +137,40 @@ describe("GraphBackend reads (fake Graph)", () => {
     expect(hits[0]?.subject).toBe("alpha-report");
   });
 
+  it("free-text search follows paging past matches the first page misses", async () => {
+    for (let i = 1; i <= 5; i += 1) {
+      fake.seed({
+        folder: "archive", subject: `page-${i}`, fromName: "Bulk",
+        fromAddress: i === 5 ? "target@x.test" : "other@x.test",
+        body: "pagetest content", isRead: true,
+        receivedAt: new Date(`2026-07-10T10:0${i}:00Z`), headers: {},
+      });
+    }
+    const hits = await backend.search({
+      folder: "archive", query: "pagetest", from: "target@x.test", subject: null,
+      since: null, before: null, unreadOnly: false, limit: 1,
+    });
+    expect(hits).toHaveLength(1);
+    expect(hits[0]?.subject).toBe("page-5");
+  });
+
+  it("filtered search follows paging past matches the first page misses", async () => {
+    for (let i = 1; i <= 5; i += 1) {
+      fake.seed({
+        folder: "archive", subject: `filter-page-${i}`, fromName: "Bulk", fromAddress: "bulk@x.test",
+        body: "unrelated", isRead: true,
+        receivedAt: new Date(`2026-08-01T10:0${i}:00Z`), headers: {},
+      });
+    }
+    const hits = await backend.search({
+      folder: "archive", query: null, from: null, subject: "filter-page-1",
+      since: new Date("2026-08-01T00:00:00Z"), before: new Date("2026-08-02T00:00:00Z"),
+      unreadOnly: false, limit: 1,
+    });
+    expect(hits).toHaveLength(1);
+    expect(hits[0]?.subject).toBe("filter-page-1");
+  });
+
   it("searches with free text and client-side criteria in one folder", async () => {
     const hits = await backend.search({
       folder: null, query: "Graph body", from: "s@x.test", subject: null,

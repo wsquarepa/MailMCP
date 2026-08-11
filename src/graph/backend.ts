@@ -43,6 +43,7 @@ const WELL_KNOWN: Record<string, string> = {
   archive: "archive", drafts: "drafts", sent: "sentitems",
 };
 const RESOLVE_PAGE = 50;
+const SEARCH_SCAN_MAX = 1000;
 const AMBIGUOUS = "__ambiguous__";
 // Outlook requires the $orderby property to lead the $filter; this clause is
 // always true and satisfies that.
@@ -246,18 +247,47 @@ export class GraphBackend implements MailBackend {
     return page.value.map((m) => this.toSummary(m));
   }
 
+  // Walks @odata.nextLink pages, keeping client-side matches until `limit` is
+  // reached. The scan is capped at SEARCH_SCAN_MAX messages so a broad query
+  // with a selective client-side filter cannot walk an entire large folder;
+  // raising the cap (or filtering server-side) is the upgrade path.
+  private async collectMatching(
+    firstPath: string,
+    limit: number,
+    keep: (message: GraphMessage) => boolean,
+  ): Promise<GraphMessage[]> {
+    const matches: GraphMessage[] = [];
+    let scanned = 0;
+    let path: string | null = firstPath;
+    while (path !== null && matches.length < limit && scanned < SEARCH_SCAN_MAX) {
+      const page: GraphPage = await this.request("GET", path, null, null);
+      scanned += page.value.length;
+      for (const message of page.value) {
+        if (matches.length < limit && keep(message)) matches.push(message);
+      }
+      path = page["@odata.nextLink"] !== undefined
+        ? page["@odata.nextLink"].replace(this.connection.baseUrl, "")
+        : null;
+    }
+    return matches;
+  }
+
   // Graph forbids $search with $filter, so with a free-text query the other
-  // criteria are applied client-side over the $search page.
+  // criteria are applied client-side over the $search pages.
   async search(options: SearchOptions): Promise<MessageSummary[]> {
     const { path, isDrafts } = await this.folderPath(options.folder);
+    const pageSize = options.limit * 4;
+    const matchesMeta = (m: GraphMessage): boolean => {
+      if (options.from !== null && toAddress(m.from)?.address.toLowerCase() !== options.from.toLowerCase()) return false;
+      if (options.subject !== null && !(m.subject ?? "").toLowerCase().includes(options.subject.toLowerCase())) return false;
+      return true;
+    };
     let messages: GraphMessage[];
     if (options.query !== null) {
-      const query = `${LIST_SELECT}&$search=${encodeURIComponent(`"${options.query}"`)}&$top=${options.limit * 4}`;
-      messages = (await this.request<GraphPage>("GET", `${path}/messages?${query}`, null, null)).value;
-      messages = messages.filter((m) => {
+      const query = `${LIST_SELECT}&$search=${encodeURIComponent(`"${options.query}"`)}&$top=${pageSize}`;
+      messages = await this.collectMatching(`${path}/messages?${query}`, options.limit, (m) => {
         const received = this.timestampOf(m);
-        if (options.from !== null && toAddress(m.from)?.address.toLowerCase() !== options.from.toLowerCase()) return false;
-        if (options.subject !== null && !(m.subject ?? "").toLowerCase().includes(options.subject.toLowerCase())) return false;
+        if (!matchesMeta(m)) return false;
         if (options.since !== null && received < options.since) return false;
         if (options.before !== null && received >= options.before) return false;
         if (options.unreadOnly && (m.isRead ?? true)) return false;
@@ -270,15 +300,10 @@ export class GraphBackend implements MailBackend {
       if (options.before !== null) clauses.push(`${timeField} lt ${isoSecond(options.before)}`);
       if (options.unreadOnly) clauses.push("isRead eq false");
       const query = `${LIST_SELECT}&$filter=${encodeURIComponent(clauses.join(" and "))}` +
-        `&$orderby=${encodeURIComponent(`${timeField} desc`)}&$top=${options.limit * 4}`;
-      messages = (await this.request<GraphPage>("GET", `${path}/messages?${query}`, null, null)).value;
-      messages = messages.filter((m) => {
-        if (options.from !== null && toAddress(m.from)?.address.toLowerCase() !== options.from.toLowerCase()) return false;
-        if (options.subject !== null && !(m.subject ?? "").toLowerCase().includes(options.subject.toLowerCase())) return false;
-        return true;
-      });
+        `&$orderby=${encodeURIComponent(`${timeField} desc`)}&$top=${pageSize}`;
+      messages = await this.collectMatching(`${path}/messages?${query}`, options.limit, matchesMeta);
     }
-    return messages.slice(0, options.limit).map((m) => this.toSummary(m));
+    return messages.map((m) => this.toSummary(m));
   }
 
   private rawHeadersOf(message: GraphMessage): string {
