@@ -1,4 +1,7 @@
-FROM node:22-alpine AS build
+# Dependencies are pure JS (no install scripts or native addons), so the build
+# stage runs natively and only the COPY-only runtime stage is per-platform;
+# running npm ci under QEMU for arm64 dies with SIGILL.
+FROM --platform=$BUILDPLATFORM node:22-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
