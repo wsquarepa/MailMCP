@@ -1,9 +1,11 @@
+import type { Socket } from "node:net";
 import { setTimeout as delay } from "node:timers/promises";
 import { ImapFlow } from "imapflow";
 import { afterAll, describe, expect, it } from "vitest";
 import { BackendUnavailableError, NotFoundError } from "../../src/errors.js";
 import { ImapSession } from "../../src/imap/session.js";
 import { imapMailboxConfig, TEST_USER } from "../helpers/greenmail.js";
+import { startStrictImapProxy } from "../helpers/strictImapProxy.js";
 
 describe("ImapSession (requires GreenMail)", () => {
   const session = new ImapSession("test", imapMailboxConfig());
@@ -99,6 +101,40 @@ describe("ImapSession (requires GreenMail)", () => {
       expect(folders).toContain("INBOX");
     } finally {
       await slow.close();
+    }
+  });
+
+  it("closes every connection it discards after a failed command", async () => {
+    const proxy = await startStrictImapProxy(3143);
+    const base = imapMailboxConfig();
+    const failing = new ImapSession("discard", { ...base, imap: { ...base.imap, port: proxy.port } });
+    try {
+      const error = await failing.withClient(async () => {
+        throw new Error("simulated server failure");
+      }).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(BackendUnavailableError);
+      await delay(200);
+      expect(proxy.openConnections()).toBe(0);
+    } finally {
+      await failing.close();
+      await proxy.close();
+    }
+  });
+
+  // ImapFlow emits 'error' on an inactive socket (5 min by default); with no
+  // listener Node treats it as uncaught and the process exits. The socket is
+  // not part of ImapFlow's typed API, so the test shortens its timeout directly.
+  it("survives an idle socket timeout and reconnects", async () => {
+    const idle = new ImapSession("idle", imapMailboxConfig());
+    try {
+      await idle.withClient(async (client) => {
+        (client as unknown as { socket: Socket }).socket.setTimeout(100);
+      });
+      await delay(500);
+      const folders = await idle.withClient(async (client) => (await client.list()).map((f) => f.path));
+      expect(folders).toContain("INBOX");
+    } finally {
+      await idle.close();
     }
   });
 

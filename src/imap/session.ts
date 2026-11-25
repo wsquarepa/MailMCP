@@ -46,11 +46,23 @@ export class ImapSession {
       auth: { user: this.config.imap.user, pass: this.config.imap.pass },
       logger: false,
     });
-    await client.connect();
+    // ImapFlow closes the connection itself before emitting 'error' (e.g. a
+    // socket idle past its 5 min timeout); without a listener Node treats
+    // the event as uncaught and the whole server exits.
+    client.on("error", (error: unknown) => {
+      logger.warn({ mailbox: this.mailboxName, error: String(error) }, "imap connection error");
+    });
     client.on("close", () => {
       if (this.client === client) this.client = null;
     });
+    await client.connect();
     return client;
+  }
+
+  private discardClient(): void {
+    const client = this.client;
+    this.client = null;
+    client?.close();
   }
 
   private async currentClient(): Promise<ImapFlow> {
@@ -71,13 +83,13 @@ export class ImapSession {
         { mailbox: this.mailboxName, error: String(error) },
         "imap command failed, reconnecting once",
       );
-      this.client = null;
+      this.discardClient();
       await delay(RECONNECT_DELAY_MS);
       try {
         return await fn(await this.currentClient());
       } catch (retryError) {
         if (retryError instanceof ToolError) throw retryError;
-        this.client = null;
+        this.discardClient();
         throw new BackendUnavailableError(this.mailboxName, String(retryError));
       }
     }
@@ -115,7 +127,7 @@ export class ImapSession {
       return await fn(await this.currentClient());
     } catch (error) {
       if (error instanceof ToolError) throw error;
-      this.client = null;
+      this.discardClient();
       throw new BackendUnavailableError(this.mailboxName, String(error));
     }
   }
