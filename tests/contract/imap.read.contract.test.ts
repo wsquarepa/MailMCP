@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ImapSmtpBackend } from "../../src/imap/backend.js";
 import { InvalidInputError, NotFoundError, ToolError } from "../../src/errors.js";
 import { imapMailboxConfig, seedMessage } from "../helpers/greenmail.js";
+import { startStrictImapProxy } from "../helpers/strictImapProxy.js";
 
 const NO_SEARCH = {
   folder: null, query: null, from: null, subject: null,
@@ -59,6 +60,21 @@ describe("ImapSmtpBackend reads (requires GreenMail)", () => {
 
   it("raises NotFoundError for a vanished uid", async () => {
     await expect(backend.getMessage("INBOX:999999")).rejects.toThrow(NotFoundError);
+  });
+
+  it("lists messages on a strict server when the mailbox configures no surface_headers", async () => {
+    const proxy = await startStrictImapProxy(3143);
+    const { surface_headers: _omitted, ...bare } = imapMailboxConfig();
+    const plain = new ImapSmtpBackend("bare", { ...bare, imap: { ...bare.imap, port: proxy.port } });
+    try {
+      const messages = await plain.listMessages({ folder: null, includeRead: true, limit: 50, offset: 0 });
+      const found = messages.find((m) => m.subject === subject);
+      expect(found).toBeDefined();
+      expect(found?.surfacedHeaders).toEqual({});
+    } finally {
+      await plain.close();
+      await proxy.close();
+    }
   });
 
   it("raises InvalidInputError naming the unknown folder and available folders when listing a bogus folder", async () => {

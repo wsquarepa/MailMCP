@@ -166,6 +166,9 @@ export class ImapSmtpBackend implements MailBackend {
       const lock = await this.lockForRead(client, folder);
       try {
         const headerFields = (this.config.surface_headers ?? []).map((h) => h.toLowerCase());
+        // RFC 3501 forbids an empty HEADER.FIELDS list and strict servers
+        // answer it with BAD, so request headers only when some are wanted.
+        const headerQuery = headerFields.length > 0 ? { headers: headerFields } : {};
         interface FetchedMeta {
           uid: number;
           envelope: Record<string, unknown> | undefined;
@@ -176,7 +179,7 @@ export class ImapSmtpBackend implements MailBackend {
         const metas: FetchedMeta[] = [];
         for await (const message of client.fetch(
           uids.join(","),
-          { uid: true, envelope: true, flags: true, bodyStructure: true, headers: headerFields },
+          { uid: true, envelope: true, flags: true, bodyStructure: true, ...headerQuery },
           { uid: true },
         )) {
           metas.push({
